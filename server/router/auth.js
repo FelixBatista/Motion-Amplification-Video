@@ -3,14 +3,25 @@ const router = express.Router()
 const bcrypt = require('bcryptjs')
 const jwt = require('jsonwebtoken')
 const authenticate = require('../middleware/authenticate')
+const mongoose = require('mongoose')
 
 require('../db/conn')
 const User = require('../model/userSchema')
+
+// Helper function to check database connection
+const checkDbConnection = () => {
+  return mongoose.connection.readyState === 1; // 1 = connected
+}
 
 
 router.post('/signup', async (req,res) => {
     
     try{
+        // Check if database is connected
+        if(!checkDbConnection()){
+            return res.status(503).json({error:"Database not connected. Please check MongoDB connection."})
+        }
+        
         const {name,email,password,cpassword} = req.body;
     
         if(!name || !email || !password || !cpassword){
@@ -32,7 +43,11 @@ router.post('/signup', async (req,res) => {
         
     }
     catch(err){
-        console.log(err)
+        console.error('Signup error:', err);
+        if(err.name === 'MongooseError' || err.message.includes('buffering')){
+            return res.status(503).json({error:"Database connection error. Please ensure MongoDB is running."})
+        }
+        res.status(500).json({error:"Server error during registration"})
     }
     
 })
@@ -41,6 +56,11 @@ router.post('/signup', async (req,res) => {
 router.post('/login', async (req,res) => {
     
     try{
+        // Check if database is connected
+        if(!checkDbConnection()){
+            return res.status(503).json({error:"Database not connected. Please check MongoDB connection."})
+        }
+        
         let token;
         const{email,password} = req.body;
         if(!email || !password){
@@ -50,7 +70,7 @@ router.post('/login', async (req,res) => {
         if(userLogin){
             const isMatch = await bcrypt.compare(password,userLogin.password);
             if(!isMatch){
-                res.status(400).json({error:"invalid credentials pass"})
+                return res.status(400).json({error:"invalid credentials pass"})
             }
             else{
                 const token = await userLogin.generateAuthToken();
@@ -59,21 +79,34 @@ router.post('/login', async (req,res) => {
                     expires: new Date(Date.now() + 25892000000),
                     httpOnly:true
                 });
-                res.json({message:"login successfull"})
+                return res.json({message:"login successfull"})
             }
         }
         else{
-            res.status(400).json({error:"invalid credentials"})
+            return res.status(400).json({error:"invalid credentials"})
         }
     }
     catch(err){
-        console.log(err)
+        console.error('Login error:', err);
+        if(err.name === 'MongooseError' || err.message.includes('buffering')){
+            return res.status(503).json({error:"Database connection error. Please ensure MongoDB is running."})
+        }
+        return res.status(500).json({error:"Server error during login"})
     }
 })
 
 router.post('/vid', async (req, res) => {
     try {
+      // Check if database is connected
+      if(!checkDbConnection()){
+        return res.status(503).json({ message: 'Database not connected. Please check MongoDB connection.' });
+      }
+      
       const { email, link } = req.body;
+  
+      if(!email || !link){
+        return res.status(400).json({ message: 'Email and link are required' });
+      }
   
       const user = await User.findOne({ email });
   
@@ -87,16 +120,50 @@ router.post('/vid', async (req, res) => {
       res.status(200).json({ message: 'Link added to user videos' });
     } catch (error) {
       console.error('Server Error:', error.message);
-      res.status(500).json({ message: 'Server Error' });
+      if(error.name === 'MongooseError' || error.message.includes('buffering')){
+        return res.status(503).json({ message: 'Database connection error. Please ensure MongoDB is running.' });
+      }
+      res.status(500).json({ message: 'Server Error: ' + error.message });
     }
   });
 
   router.post('/videos', async (req,res) => {
     try{
-        let myData = await User.findOne({'email': req.body.email})
-        res.json({videos:myData.videos})
+        // Check if database is connected
+        if(!checkDbConnection()){
+            console.error('Database not connected');
+            return res.status(503).json({
+                error: "Database not connected. Please check MongoDB connection.", 
+                videos: []
+            })
+        }
+        
+        const { email } = req.body;
+        
+        if(!email){
+            return res.status(400).json({error: "Email is required", videos: []})
+        }
+        
+        const myData = await User.findOne({'email': email})
+        
+        if(!myData){
+            return res.status(404).json({error: "User not found", videos: []})
+        }
+        
+        // Return videos array, defaulting to empty array if not set
+        res.json({videos: myData.videos || []})
     }catch(error){
-        res.send("Server Error",error.message)
+        console.error('Error fetching videos:', error);
+        
+        // Check if it's a MongoDB connection error
+        if(error.name === 'MongooseError' || error.message.includes('buffering')){
+            return res.status(503).json({
+                error: "Database connection error. Please ensure MongoDB is running.", 
+                videos: []
+            })
+        }
+        
+        res.status(500).json({error: "Server Error: " + error.message, videos: []})
     }
 })
 
