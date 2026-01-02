@@ -36,7 +36,13 @@ router.post('/signup', async (req,res) => {
             return res.status(422).json({error:"Password not matching"})
         }
         else{
-            const user = new User({name,email,password,cpassword});
+            const user = new User({
+                name,
+                email,
+                password,
+                cpassword,
+                videos: [] // Initialize empty videos array
+            });
             await user.save()
             res.status(201).json({message:"User registered succesfully"})
         }
@@ -70,19 +76,22 @@ router.post('/login', async (req,res) => {
         if(userLogin){
             const isMatch = await bcrypt.compare(password,userLogin.password);
             if(!isMatch){
-                return res.status(400).json({error:"invalid credentials pass"})
+                console.log('Password comparison failed for user:', email);
+                return res.status(400).json({error:"invalid credentials"})
             }
             else{
                 const token = await userLogin.generateAuthToken();
-                console.log(token)
+                console.log('Login successful for user:', email);
                 res.cookie("jwtoken",token,{
                     expires: new Date(Date.now() + 25892000000),
-                    httpOnly:true
+                    httpOnly:true,
+                    sameSite: 'lax'
                 });
                 return res.json({message:"login successfull"})
             }
         }
         else{
+            console.log('User not found:', email);
             return res.status(400).json({error:"invalid credentials"})
         }
     }

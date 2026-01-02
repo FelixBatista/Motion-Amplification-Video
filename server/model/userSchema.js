@@ -21,7 +21,7 @@ const userSchema = new mongoose.Schema({
     },
     videos:{
         type:Array,
-        required:true
+        default:[]
     }, 
     tokens:[
         {
