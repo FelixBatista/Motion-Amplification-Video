@@ -28,7 +28,11 @@ router.post('/signup', async (req,res) => {
             return res.status(422).json({error:"plz fill the field"})
         }
 
-        const userExist = await User.findOne({email:email})
+        // Trim and normalize email for case-insensitive search
+        const emailNormalized = email.trim().toLowerCase();
+        const userExist = await User.findOne({ 
+            email: { $regex: new RegExp(`^${emailNormalized}$`, 'i') } 
+        })
         if(userExist){
             return res.status(422).json({error:"Email already exist"})
         }
@@ -36,9 +40,10 @@ router.post('/signup', async (req,res) => {
             return res.status(422).json({error:"Password not matching"})
         }
         else{
+            // Normalize email to lowercase for consistent storage
             const user = new User({
                 name,
-                email,
+                email: email.trim().toLowerCase(),
                 password,
                 cpassword,
                 videos: [] // Initialize empty videos array
@@ -72,16 +77,21 @@ router.post('/login', async (req,res) => {
         if(!email || !password){
             return res.status(422).json({error:"plz fill the field"})
         }
-        const userLogin = await User.findOne({email:email})
+        // Trim whitespace and convert to lowercase for case-insensitive search
+        const emailTrimmed = email.trim().toLowerCase();
+        
+        // Case-insensitive email search using regex
+        const userLogin = await User.findOne({ 
+            email: { $regex: new RegExp(`^${emailTrimmed}$`, 'i') } 
+        })
+        
         if(userLogin){
             const isMatch = await bcrypt.compare(password,userLogin.password);
             if(!isMatch){
-                console.log('Password comparison failed for user:', email);
                 return res.status(400).json({error:"invalid credentials"})
             }
             else{
                 const token = await userLogin.generateAuthToken();
-                console.log('Login successful for user:', email);
                 res.cookie("jwtoken",token,{
                     expires: new Date(Date.now() + 25892000000),
                     httpOnly:true,
@@ -91,7 +101,6 @@ router.post('/login', async (req,res) => {
             }
         }
         else{
-            console.log('User not found:', email);
             return res.status(400).json({error:"invalid credentials"})
         }
     }
@@ -117,7 +126,11 @@ router.post('/vid', async (req, res) => {
         return res.status(400).json({ message: 'Email and link are required' });
       }
   
-      const user = await User.findOne({ email });
+      // Normalize email for case-insensitive search
+      const emailNormalized = email.trim().toLowerCase();
+      const user = await User.findOne({ 
+          email: { $regex: new RegExp(`^${emailNormalized}$`, 'i') } 
+      });
   
       if (!user) {
         return res.status(404).json({ message: 'User not found' });
@@ -153,7 +166,11 @@ router.post('/vid', async (req, res) => {
             return res.status(400).json({error: "Email is required", videos: []})
         }
         
-        const myData = await User.findOne({'email': email})
+        // Normalize email for case-insensitive search
+        const emailNormalized = email.trim().toLowerCase();
+        const myData = await User.findOne({ 
+            email: { $regex: new RegExp(`^${emailNormalized}$`, 'i') } 
+        })
         
         if(!myData){
             return res.status(404).json({error: "User not found", videos: []})
