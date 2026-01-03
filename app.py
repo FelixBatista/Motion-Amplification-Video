@@ -6,6 +6,7 @@ import os
 import sys
 import shutil
 from pathlib import Path
+from datetime import datetime
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, HTMLResponse
@@ -83,6 +84,88 @@ async def get_video(filename: str):
     video_path = Path("data/uploads") / filename
     if not video_path.exists():
         raise HTTPException(status_code=404, detail="Video not found")
+    return FileResponse(str(video_path), media_type="video/mp4")
+
+@app.get("/api/outputs")
+async def list_outputs():
+    """List all processed output videos from data/output folder"""
+    output_dir = Path("data/output")
+    outputs = []
+    
+    if not output_dir.exists():
+        return {"outputs": []}
+    
+    for folder in output_dir.iterdir():
+        if folder.is_dir():
+            # Look for the output video file (*_259002.mp4)
+            video_files = list(folder.glob("*_259002.mp4"))
+            if video_files:
+                video_file = video_files[0]  # Take the first match
+                stat = video_file.stat()
+                
+                # Extract metadata from folder name
+                folder_name = folder.name
+                
+                # Try to extract original video name and parameters
+                # Format: {name}_o3f_hmhm2_bg_qnoise_mix4_nl_n_t_ds3[_fl{fl}_fh{fh}_fs{fs}_n{n}_{filter_type}]
+                parts = folder_name.split("_o3f_hmhm2_bg_qnoise_mix4_nl_n_t_ds3")
+                original_name = parts[0] if parts else folder_name
+                
+                # Extract parameters if they exist
+                params = {}
+                if len(parts) > 1 and "_fl" in parts[1]:
+                    param_part = parts[1]
+                    # Try to extract fl, fh, fs, n, filter_type
+                    try:
+                        if "_fl" in param_part:
+                            fl_start = param_part.find("_fl") + 3
+                            fl_end = param_part.find("_fh", fl_start)
+                            if fl_end == -1:
+                                fl_end = len(param_part)
+                            params["fl"] = param_part[fl_start:fl_end]
+                            
+                        if "_fh" in param_part:
+                            fh_start = param_part.find("_fh") + 3
+                            fh_end = param_part.find("_fs", fh_start)
+                            if fh_end == -1:
+                                fh_end = len(param_part)
+                            params["fh"] = param_part[fh_start:fh_end]
+                            
+                        if "_fs" in param_part:
+                            fs_start = param_part.find("_fs") + 3
+                            fs_end = param_part.find("_n", fs_start)
+                            if fs_end == -1:
+                                fs_end = len(param_part)
+                            params["fs"] = param_part[fs_start:fs_end]
+                    except:
+                        pass
+                
+                # Get modification time (when it was processed)
+                modified_time = datetime.fromtimestamp(stat.st_mtime)
+                
+                outputs.append({
+                    "id": folder_name,
+                    "title": original_name,
+                    "folder": folder_name,
+                    "filename": video_file.name,
+                    "path": f"/api/output/{folder_name}/{video_file.name}",
+                    "size": stat.st_size,
+                    "created": modified_time.isoformat(),
+                    "created_timestamp": stat.st_mtime,
+                    "parameters": params
+                })
+    
+    # Sort by most recent first (by timestamp)
+    outputs.sort(key=lambda x: x["created_timestamp"], reverse=True)
+    
+    return {"outputs": outputs}
+
+@app.get("/api/output/{folder_name}/{filename}")
+async def get_output_video(folder_name: str, filename: str):
+    """Serve an output video file from data/output folder"""
+    video_path = Path("data/output") / folder_name / filename
+    if not video_path.exists():
+        raise HTTPException(status_code=404, detail="Output video not found")
     return FileResponse(str(video_path), media_type="video/mp4")
 
 @app.post("/api/upload")
