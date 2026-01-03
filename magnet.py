@@ -214,7 +214,9 @@ class MagNet3Frames(object):
 
         # Try to combine it into a video
         call([DEFAULT_VIDEO_CONVERTER, '-y', '-f', 'image2', '-r', '30', '-i',
-               os.path.join(out_dir, '%06d.png'), '-c:v', 'libx264',
+              os.path.join(out_dir, '%06d.png'), '-c:v', 'libx264',
+              '-preset', 'medium', '-crf', '23', '-pix_fmt', 'yuv420p',
+              '-profile:v', 'baseline', '-level', '3.0', '-movflags', '+faststart',
               os.path.join(out_dir, vid_name + '.mp4')]
             )
 
@@ -373,9 +375,11 @@ class MagNet3Frames(object):
                 cv2.imwrite(im_path, cv2.cvtColor(out_amp,code=cv2.COLOR_RGB2BGR))
             del x_state
 
-        # Try to combine it into a video
+        # Try to combine it into a video with Windows-compatible encoding
         call([DEFAULT_VIDEO_CONVERTER, '-y', '-f', 'image2', '-r', '30', '-i',
               os.path.join(out_dir, '%06d.png'), '-c:v', 'libx264',
+              '-preset', 'medium', '-crf', '23', '-pix_fmt', 'yuv420p',
+              '-profile:v', 'baseline', '-level', '3.0', '-movflags', '+faststart',
               os.path.join(out_dir, vid_name + '.mp4')]
             )
 

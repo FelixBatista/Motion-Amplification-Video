@@ -1,12 +1,10 @@
 import React from 'react';
-import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faDownload } from '@fortawesome/free-solid-svg-icons';
-import Navbar from '../components/Navbar'; // Update the import path as needed
-import OpVid from '../components/OpVid'; // Update the import path as needed
-import OpPara from '../components/OpPara'; // Update the import path as needed
-import { useNavigate,useLocation } from 'react-router-dom';
+import Navbar from '../components/Navbar';
+import OpVid from '../components/OpVid';
+import OpPara from '../components/OpPara';
+import { useLocation } from 'react-router-dom';
+
 function Output() {
-  const parameters = ['Parameter 1', 'Parameter 2', 'Parameter 3']; // Update with your parameters
 
   // Function to handle the download action
   // const handleDownload = async () => {
@@ -33,20 +31,20 @@ function Output() {
   //   }
   // };
 
-const location = useLocation()
-const navigate = useNavigate()
+const location = useLocation();
 
-const data = location.state?.data 
-const params = location.state?.data.inputParameters
-const link = location.state?.data.link
-console.log("data:" + data)
-console.log("params:" + params)
-console.log("link:" + link)
+const data = location.state?.data;
+const params = location.state?.data?.inputParameters;
+// Support both 'link' and 'outputPath' for backward compatibility
+const link = location.state?.data?.link || location.state?.data?.outputPath;
+console.log("data:", data)
+console.log("params:", params)
+console.log("link:", link)
   return (
-    <div>
+    <div className="h-screen flex flex-col">
       <Navbar />
-      <div className="flex">
-        <div className="relative bg-light w-3/4">
+      <div className="flex flex-1 min-h-0">
+        <div className="relative bg-light w-3/4 h-full">
           <OpVid videoPath={link} />
           {/* <div className="absolute top-0 right-0 mt-4 mr-4">
             <button

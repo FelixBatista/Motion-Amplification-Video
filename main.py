@@ -4,7 +4,10 @@ import shutil
 import tensorflow as tf
 import setproctitle
 from configobj import ConfigObj
-from validate import Validator
+try:
+    from validate import Validator
+except ImportError:
+    from configobj.validate import Validator
 from magnet import MagNet3Frames
 
 

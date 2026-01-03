@@ -80,26 +80,69 @@ def download_video_from_s3(bucket_name,key, download_path):
 
 @app.post("/upload/")
 async def get(json: JsonRequest):
-    BUCKET_NAME = "skillissuevid"
-    print("json:" ,  json)
-    obj = json.selectedVideo.split("/")[-1]
-    download_video_from_s3(BUCKET_NAME,obj,obj)
-    name = obj.split(".")[0]
-    if not os.path.exists(f"data/vids/{name}"):
-        os.mkdir(f"data/vids/{name}")
-    os.system(f"ffmpeg -i {obj} data/vids/{name}"+"/%06d.png")
-    if json.inputParameters.Temporal:
-        command = (
-        f"python main.py --config_file=configs/o3f_hmhm2_bg_qnoise_mix4_nl_n_t_ds3.conf --phase=run_temporal --vid_dir=data/vids/{name} --out_dir=data/output/{name}_o3f_hmhm2_bg_qnoise_mix4_nl_n_t_ds3 --amplification_factor={int(json.inputParameters.amplification_factor)} --fl={float(json.inputParameters.fl)} --fh={float(json.inputParameters.fh)} --fs={int(json.inputParameters.fs)} --n_filter_tap={int(json.inputParameters.n_filter_tap)} --filter_type={json.inputParameters.filter_type}")
-        folder = f"{name}_o3f_hmhm2_bg_qnoise_mix4_nl_n_t_ds3_fl{json.inputParameters.fl}_fh{json.inputParameters.fh}_fs{json.inputParameters.fs}_n{json.inputParameters.n_filter_tap}_{json.inputParameters.filter_type}"
-    else:
-        command = (
-        f"python main.py  --config_file=configs/o3f_hmhm2_bg_qnoise_mix4_nl_n_t_ds3.conf --phase=run --vid_dir=data/vids/{name} --out_dir=data/output/{name}_o3f_hmhm2_bg_qnoise_mix4_nl_n_t_ds3 --amplification_factor={int(json.inputParameters.amplification_factor)}"
-        )
-        folder=f"{name}_o3f_hmhm2_bg_qnoise_mix4_nl_n_t_ds3"
-    os.system(command)
-    upload_file_to_s3(f"data/output/{folder}/{folder}_259002.mp4",BUCKET_NAME,f"{name}_output.mp4")
-    return {"link": f"https://d175wanlbunlv0.cloudfront.net/{name}_output.mp4","inputParameters":json.inputParameters}
+    try:
+        BUCKET_NAME = "skillissuevid"
+        print("Received upload request:", json.selectedVideo)
+        
+        obj = json.selectedVideo.split("/")[-1]
+        print(f"Downloading {obj} from S3...")
+        
+        # Download video from S3
+        try:
+            download_video_from_s3(BUCKET_NAME, obj, obj)
+        except Exception as e:
+            print(f"Error downloading from S3: {str(e)}")
+            return {"error": f"Failed to download video from S3: {str(e)}"}
+        
+        name = obj.split(".")[0]
+        
+        # Create directories
+        os.makedirs(f"data/vids/{name}", exist_ok=True)
+        os.makedirs(f"data/output", exist_ok=True)
+        
+        print(f"Converting video to frames with ffmpeg...")
+        # Convert video to frames
+        ffmpeg_result = os.system(f'ffmpeg -i "{obj}" "data/vids/{name}/%06d.png"')
+        if ffmpeg_result != 0:
+            return {"error": "FFmpeg failed to convert video to frames. Make sure FFmpeg is installed."}
+        
+        print(f"Processing video with main.py...")
+        # Build command based on Temporal flag
+        if json.inputParameters.Temporal:
+            command = (
+                f"python main.py --config_file=configs/o3f_hmhm2_bg_qnoise_mix4_nl_n_t_ds3.conf --phase=run_temporal --vid_dir=data/vids/{name} --out_dir=data/output/{name}_o3f_hmhm2_bg_qnoise_mix4_nl_n_t_ds3 --amplification_factor={int(json.inputParameters.amplification_factor)} --fl={float(json.inputParameters.fl)} --fh={float(json.inputParameters.fh)} --fs={int(json.inputParameters.fs)} --n_filter_tap={int(json.inputParameters.n_filter_tap)} --filter_type={json.inputParameters.filter_type}"
+            )
+            folder = f"{name}_o3f_hmhm2_bg_qnoise_mix4_nl_n_t_ds3_fl{json.inputParameters.fl}_fh{json.inputParameters.fh}_fs{json.inputParameters.fs}_n{json.inputParameters.n_filter_tap}_{json.inputParameters.filter_type}"
+        else:
+            command = (
+                f"python main.py --config_file=configs/o3f_hmhm2_bg_qnoise_mix4_nl_n_t_ds3.conf --phase=run --vid_dir=data/vids/{name} --out_dir=data/output/{name}_o3f_hmhm2_bg_qnoise_mix4_nl_n_t_ds3 --amplification_factor={int(json.inputParameters.amplification_factor)}"
+            )
+            folder = f"{name}_o3f_hmhm2_bg_qnoise_mix4_nl_n_t_ds3"
+        
+        # Run video processing (this takes a long time)
+        process_result = os.system(command)
+        if process_result != 0:
+            return {"error": "Video processing failed. Check server logs for details."}
+        
+        output_file = f"data/output/{folder}/{folder}_259002.mp4"
+        if not os.path.exists(output_file):
+            return {"error": f"Output file not found: {output_file}"}
+        
+        print(f"Uploading processed video to S3...")
+        # Upload processed video to S3
+        upload_success = upload_file_to_s3(output_file, BUCKET_NAME, f"{name}_output.mp4")
+        if not upload_success:
+            return {"error": "Failed to upload processed video to S3"}
+        
+        result_link = f"https://d175wanlbunlv0.cloudfront.net/{name}_output.mp4"
+        print(f"Video processing complete: {result_link}")
+        return {"link": result_link, "inputParameters": json.inputParameters}
+        
+    except Exception as e:
+        print(f"Error in upload endpoint: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return {"error": f"Server error: {str(e)}"}
 
 
 

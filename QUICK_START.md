@@ -1,76 +1,70 @@
-# Quick Start Guide
+# Quick Start Guide - Standalone Application
 
-## Before You Start
+## Installation
 
-1. **Install CORS package** (if not already installed):
+1. **Install Python dependencies:**
    ```bash
-   cd server
-   npm install cors
+   python -m pip install fastapi uvicorn python-multipart
    ```
 
-2. **Create database config file**:
-   - Copy `server/config.env.example` to `server/config.env`
-   - Update the MongoDB connection string
-   - Set your JWT secret keys
+2. **Build the frontend:**
+   ```bash
+   cd frontend
+   npm install
+   npm run build
+   cd ..
+   ```
 
-## Start All Services
+## Running the Application
 
-### Option 1: Use the Batch Script (Windows)
+Simply run:
 ```bash
-start-all.bat
+python app.py
 ```
 
-### Option 2: Manual Start (3 Terminal Windows)
-
-**Terminal 1 - Backend:**
+Or use the batch file:
 ```bash
-cd server
-npm install cors  # If not already installed
-npm start
+run_standalone.bat
 ```
 
-**Terminal 2 - Frontend:**
+The application will be available at: **http://localhost:8000**
+
+## Troubleshooting
+
+### "python-multipart" error
+
+If you get an error about python-multipart, install it:
+```bash
+python -m pip install python-multipart
+```
+
+Make sure you're using the same Python that runs the app. Check with:
+```bash
+python --version
+python -m pip install python-multipart
+```
+
+### Port already in use
+
+If port 8000 is in use, set a different port:
+```bash
+set PORT=8001
+python app.py
+```
+
+### Frontend not found
+
+Make sure you've built the frontend:
 ```bash
 cd frontend
-npm start
+npm run build
+cd ..
 ```
 
-**Terminal 3 - Python API:**
-```bash
-# First, install required packages (if not already done):
-python -m pip install fastapi uvicorn pydantic boto3
+## Features
 
-# Then start the API:
-python api.py
-```
-
-## Verify Everything is Working
-
-1. **Backend Server**: Open http://localhost:3001/health
-   - Should return: `{"status":"ok","message":"Server is running"}`
-
-2. **Frontend**: Open http://localhost:3000
-   - Should load the homepage
-
-3. **Python API**: Check terminal for "Starting server..." message
-   - Should be running on port 8080
-
-## Common Issues Fixed
-
-✅ **CORS errors** - Fixed by adding CORS middleware to server
-✅ **404 errors** - Routes are properly configured, just need all services running
-✅ **Port conflicts** - All ports are clearly documented
-
-## Port Summary
-
-- Frontend: **3000**
-- Backend: **3001**  
-- Python API: **8080**
-
-## Next Steps
-
-1. Make sure MongoDB is running
-2. Create `server/config.env` with your database connection
-3. Start all three services
-4. Try signing up a new user at http://localhost:3000/signup
-
+- ✅ No authentication required
+- ✅ No database needed
+- ✅ No internet connection required
+- ✅ All videos stored locally in `data/uploads/`
+- ✅ Single Python server handles everything

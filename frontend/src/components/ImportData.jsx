@@ -1,64 +1,77 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 
-const ImportData = () => {
+const ImportData = ({ selectedVideo, onDataChange }) => {
   const [filePath, setFilePath] = useState('');
-  const [samplingRate, setSamplingRate] = useState('');
+  const [samplingRate, setSamplingRate] = useState('30');
   const [unitChecked, setUnitChecked] = useState(false);
 
+  // Auto-populate when video is selected
+  useEffect(() => {
+    if (selectedVideo) {
+      // Extract video path from selectedVideo (e.g., "/api/video/filename.mp4")
+      const videoName = selectedVideo.split('/').pop() || '';
+      // Auto-populate with default path (can be customized)
+      setFilePath(videoName);
+      setSamplingRate('30'); // Default frame rate
+      
+      // Notify parent component
+      if (onDataChange) {
+        onDataChange({ filePath: videoName, samplingRate: '30' });
+      }
+    }
+  }, [selectedVideo, onDataChange]);
+
   const handleImportClick = () => {
-    // Handle import logic here
+    // Manual import (backup) - could trigger file picker or API call
+    if (onDataChange) {
+      onDataChange({ filePath, samplingRate });
+    }
   };
 
   const handleDoneClick = () => {
-    // Handle done logic here
+    // Done button - fields are already populated
+    if (onDataChange) {
+      onDataChange({ filePath, samplingRate });
+    }
   };
 
   return (
-    <div className="font-sans rounded-lg bg-light p-4 shadow-md">
-      <h2 className="text-lg font-bold">Import Data</h2>
-      <div className="text-sm mt-4">
-        <p>Enter full path and frame rate</p>
-        <p>Data dr</p>
+    <div className="font-sans rounded-lg bg-light p-4 shadow-md mb-4">
+      <h2 className="text-lg font-bold mb-3">Import Data</h2>
+      <div className="text-sm mt-2">
+        <label className="block mb-1">Video File</label>
         <input
           type="text"
           placeholder="Path to file or folder"
           value={filePath}
-          className="block w-2/3 mt-1 border-gray-300 rounded-md focus:ring focus:ring-default"
-          onChange={(e) => setFilePath(e.target.value)}
+          readOnly
+          className="block w-full mt-1 p-2 border border-gray-300 rounded-md bg-gray-50"
         />
       </div>
-      <div className="text-sm mt-4">
-        <p>Sampling Rate</p>
+      <div className="text-sm mt-3">
+        <label className="block mb-1">Sampling Rate (Hz)</label>
         <input
           type="number"
           placeholder="Sampling rate (Hz)"
           value={samplingRate}
-          className="block w-2/3 mt-1 border-gray-300 rounded-md focus:ring focus:ring-default"
-          onChange={(e) => setSamplingRate(e.target.value)}
+          className="block w-full mt-1 p-2 border border-gray-300 rounded-md"
+          onChange={(e) => {
+            setSamplingRate(e.target.value);
+            if (onDataChange) onDataChange({ filePath, samplingRate: e.target.value });
+          }}
         />
       </div>
-      <div className="text-sm mt-2">
-        <input
-          type="checkbox"
-          id="unitCheckbox"
-          checked={unitChecked}
-
-          onChange={() => setUnitChecked(!unitChecked)}
-        />
-        <label htmlFor="unitCheckbox" className='ml-1'>Change to units for denoising</label>
-      </div>
-      <div className="text-sm mt-4">
+      {filePath && (
+        <div className="text-xs mt-3 text-gray-600 italic">
+          ✓ Auto-populated from selected video. Use Import button to override.
+        </div>
+      )}
+      <div className="text-sm mt-3 flex gap-2">
         <button
-          className="bg-darker text-white px-3 py-1 rounded-2xl"
+          className="bg-darker text-white px-4 py-2 rounded-md hover:bg-opacity-90"
           onClick={handleImportClick}
         >
-          Import
-        </button>
-        <button
-          className="bg-dark text-white ml-2 mb-5 px-4 py-1 rounded-full"
-          onClick={handleDoneClick}
-        >
-          Done
+          Import (Manual)
         </button>
       </div>
 

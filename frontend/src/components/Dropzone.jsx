@@ -1,9 +1,7 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { useDropzone } from 'react-dropzone';
-import { Storage } from 'aws-amplify';
 
-const Dropzone = ({ onDrop,loading}) => {
-  const [uploadProgress, setUploadProgress] = useState(0);
+const Dropzone = ({ onDrop, loading }) => {
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
     accept: 'video/*',

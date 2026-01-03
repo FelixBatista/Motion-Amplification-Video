@@ -1,32 +1,42 @@
-import React, { useState } from 'react';
+import React from 'react';
 
 const OpVid = ({ videoPath }) => {
-  const [selectedFile, setSelectedFile] = useState(videoPath);
-
-  const handleFileSelect = (e) => {
-    const file = e.target.files[0];
-    setSelectedFile(file);
+  // Get video URL - handle both file paths and API paths
+  const getVideoUrl = (path) => {
+    if (!path) return null;
+    // If it's already a full URL, return it
+    if (path.startsWith('http')) {
+      return path;
+    }
+    // If path starts with /api/, use it directly (relative URL works)
+    if (path.startsWith('/api/')) {
+      return path;
+    }
+    // Otherwise prepend /api/video/
+    return `/api/video/${path}`;
   };
 
+  const videoUrl = getVideoUrl(videoPath);
+
   return (
-    <div className="w-3/4 h-screen bg-light flex flex-col justify-center items-center">
-      {!selectedFile ? (
-        <div>
-          {/* <label htmlFor="fileInput" className="bg-default text-white py-2 px-4 rounded-full hover:bg-darker cursor-pointer">
-            Choose File
-          </label> */}
-          <input
-            type="file"
-            id="fileInput"
-            accept=".mp4"
-            onChange={handleFileSelect}
-            className="hidden"
-          />
+    <div className="w-full h-full bg-light flex flex-col justify-center items-center">
+      {!videoUrl ? (
+        <div className="text-gray-500">
+          <p>No video available</p>
+          <p className="text-sm mt-2">Process a video to see the output here</p>
         </div>
       ) : (
-        <div className="w-3/4 h-3/4 rounded-2xl">
-          <video controls className="w-full h-full">
-            <source src={selectedFile} type="video/mp4" />
+        <div className="w-full h-full p-4 flex items-center justify-center">
+          <video 
+            controls 
+            loop
+            autoPlay
+            muted
+            className="w-full h-full object-contain"
+            style={{ maxHeight: '100%', maxWidth: '100%' }}
+          >
+            <source src={videoUrl} type="video/mp4" />
+            Your browser does not support the video tag.
           </video>
         </div>
       )}

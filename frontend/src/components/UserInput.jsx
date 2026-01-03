@@ -2,20 +2,20 @@ import React, { useState } from 'react';
 
 function UserInput({ onSubmit }) {
   const [formData, setFormData] = useState({
-    phase: 'train',
-    config_file: '',
+    phase: 'run',
+    config_file: 'o3f_hmhm2_bg_qnoise_mix4_nl_n_t_ds3.conf',
     config_spec: 'configs/configspec.conf',
-    vid_dir: '',
+    vid_dir: 'data/vids',
     frame_ext: 'png',
-    out_dir: '',
-    amplification_factor: 5,
+    out_dir: 'data/output',
+    amplification_factor: 30,
     velocity_mag: false,
-    fl: 0,
-    fh: 0,
-    fs: 0,
-    n_filter_tap: 0,
-    filter_type: 'butter',
-    Temporal: false, // Initialize Temporal as false
+    fl: 0.04,
+    fh: 0.4,
+    fs: 30,
+    n_filter_tap: 2,
+    filter_type: 'differenceOfIIR',
+    Temporal: true, // Initialize Temporal as true
   });
 
   const handleChange = (e) => {
@@ -32,10 +32,12 @@ function UserInput({ onSubmit }) {
     e.preventDefault();
     // Call the onSubmit prop with the form data
     onSubmit(formData);
+    // Provide visual feedback
+    alert('Parameters updated successfully! Click "Process Video (MAV)" to start processing.');
   };
 
   return (
-      <div className="bg-light mt-20 p-4 rounded-lg shadow-md w-full h-screen">
+      <div className="bg-light p-4 rounded-lg shadow-md w-full">
         <h2 className="text-lg font-semibold">Parameters:</h2>
         <div className="max-h-full overflow-y-auto">
           <form onSubmit={handleSubmit}>
@@ -114,7 +116,7 @@ function UserInput({ onSubmit }) {
           <label className="block text-sm font-medium text-gray-700">Amplification Factor:</label>
           <input
             type="number"
-            pattern="[0-9]{10}"
+            step="0.1"
             name="amplification_factor"
             value={formData.amplification_factor}
             onChange={handleChange}
@@ -153,8 +155,8 @@ function UserInput({ onSubmit }) {
           <label className="block text-sm font-medium text-gray-700">Low Cutoff Frequency:</label>
           <input
             type="number"
+            step="0.01"
             name="fl"
-            pattern="[0-9]{10}"
             value={formData.fl}
             onChange={handleChange}
             className="block w-full mt-1 p-2 border border-gray-300 rounded-md"
@@ -165,8 +167,8 @@ function UserInput({ onSubmit }) {
           <label className="block text-sm font-medium text-gray-700">High Cutoff Frequency:</label>
           <input
             type="number"
+            step="0.01"
             name="fh"
-            pattern="[0-9]{10}"
             value={formData.fh}
             onChange={handleChange}
             className="block w-full mt-1 p-2 border border-gray-300 rounded-md"
@@ -177,8 +179,8 @@ function UserInput({ onSubmit }) {
           <label className="block text-sm font-medium text-gray-700">Sampling Rate:</label>
           <input
             type="number"
+            step="0.1"
             name="fs"
-            pattern="[0-9]{10}"
             value={formData.fs}
             onChange={handleChange}
             className="block w-full mt-1 p-2 border border-gray-300 rounded-md"
@@ -190,7 +192,6 @@ function UserInput({ onSubmit }) {
           <input
             type="number"
             name="n_filter_tap"
-            pattern="[0-9]{10}"
             value={formData.n_filter_tap}
             onChange={handleChange}
             className="block w-full mt-1 p-2 border border-gray-300 rounded-md"
