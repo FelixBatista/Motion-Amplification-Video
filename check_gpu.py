@@ -69,7 +69,7 @@ def check_gpu():
                 except:
                     pass
                     
-            print("\n✓ GPU computation test completed successfully!")
+            print("\n[OK] GPU computation test completed successfully!")
             print("GPU should be available for neural network processing.")
         except Exception as e:
             print(f"\n✗ GPU computation test failed: {e}")
