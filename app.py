@@ -618,7 +618,9 @@ async def process_video(http_request: Request):
             
             # Run auto-tuning (use processing video path which may be stabilized)
             print("Running auto-tuning analysis...")
-            fps = auto_tuning.detect_video_fps(str(processing_video_path))
+            auto_detected_fps = auto_tuning.detect_video_fps(str(processing_video_path))
+            # Use manual FPS override if provided
+            fps = overrides.get('fs', auto_detected_fps) if overrides else auto_detected_fps
             roi = auto_tuning.detect_roi(str(processing_video_path))
             frequencies = auto_tuning.detect_dominant_frequencies(str(processing_video_path), roi, fps)
             suggested_amplification = auto_tuning.find_safe_amplification(str(processing_video_path), roi, fs=fps)
@@ -677,13 +679,16 @@ async def process_video(http_request: Request):
             python_cmd = "py -3.10"
             
             if cli_args['phase'] == 'run_temporal':
+                # Use velocity_mag if specified
+                velocity_mag_flag = '--velocity_mag' if cli_args.get('velocity_mag', False) else ''
                 command = (
                     f'{python_cmd} main.py --config_file={config_file_quoted} --phase=run_temporal '
                     f'--vid_dir={vid_dir_quoted} --out_dir={out_dir_quoted} '
                     f'--amplification_factor={cli_args["amplification_factor"]} '
                     f'--fl={cli_args["fl"]} --fh={cli_args["fh"]} --fs={fps} '
                     f'--n_filter_tap={cli_args["n_filter_tap"]} --filter_type={cli_args["filter_type"]}'
-                )
+                    f' {velocity_mag_flag}'
+                ).strip()
                 folder = f"{name}_o3f_hmhm2_bg_qnoise_mix4_nl_n_t_ds3_fl{cli_args['fl']}_fh{cli_args['fh']}_fs{fps}_n{cli_args['n_filter_tap']}_{cli_args['filter_type']}"
             else:
                 command = (

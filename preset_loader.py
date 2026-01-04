@@ -149,8 +149,16 @@ def preset_to_cli_args(preset: ConfigObj, model_config_path: str = None,
         preset['run']['strength'] = str(overrides['strength'])
     if 'roi' in overrides:
         preset['run']['roi'] = overrides['roi']
+    if 'mode' in overrides:
+        preset['run']['mode'] = overrides['mode']
     if 'fl' in overrides and 'fh' in overrides:
         preset['temporal']['band'] = f"{overrides['fl']},{overrides['fh']}"
+    if 'velocity_mag' in overrides:
+        preset['temporal']['velocity_mag'] = 'true' if overrides['velocity_mag'] else 'false'
+    if 'filter_type' in overrides:
+        preset['temporal']['filter'] = overrides['filter_type']
+    if 'n_filter_tap' in overrides:
+        preset['temporal']['n_filter_tap'] = str(overrides['n_filter_tap'])
     
     # Build CLI arguments
     args = {

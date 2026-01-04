@@ -33,6 +33,11 @@ const PresetWizard = ({ selectedVideo, onProcess }) => {
   const [trimEnd, setTrimEnd] = useState(0);
   const [enableTrim, setEnableTrim] = useState(false);
   const [presetList, setPresetList] = useState([]);
+  const [velocityMag, setVelocityMag] = useState(false);
+  const [filterType, setFilterType] = useState('differenceOfIIR');
+  const [nFilterTap, setNFilterTap] = useState(2);
+  const [manualFps, setManualFps] = useState(null);
+  const [processingMode, setProcessingMode] = useState('standard');
   const videoRef = useRef(null);
 
   // Load presets on mount
@@ -110,6 +115,11 @@ const PresetWizard = ({ selectedVideo, onProcess }) => {
           setFl(Math.max(0.01, topFreq * 0.7));
           setFh(Math.min(fps / 2, topFreq * 1.3));
         }
+
+        // In advanced mode, don't override manual FPS
+        if (preset !== 'advanced' || manualFps === null) {
+          setManualFps(null); // Reset manual FPS when auto-detected
+        }
       }
     } catch (error) {
       console.error('Analysis failed:', error);
@@ -122,8 +132,18 @@ const PresetWizard = ({ selectedVideo, onProcess }) => {
     setPreset(presetName);
     if (presetName === 'advanced') {
       setShowAdvanced(true);
+      // In advanced mode, enable manual control
+      setTemporalMode('on');
+      setManualBand(true);
+      setProcessingMode('temporal');
     } else {
       setShowAdvanced(false);
+      // Reset to defaults when switching away from advanced
+      setVelocityMag(false);
+      setFilterType('differenceOfIIR');
+      setNFilterTap(2);
+      setManualFps(null);
+      setProcessingMode('standard');
     }
   };
 
@@ -209,9 +229,20 @@ const PresetWizard = ({ selectedVideo, onProcess }) => {
       }
       
       // Map temporal band if manual
-      if (manualBand || temporalMode === 'on') {
+      if (manualBand || temporalMode === 'on' || preset === 'advanced') {
         overrides.fl = fl;
         overrides.fh = fh;
+      }
+
+      // Map advanced parameters if in advanced mode
+      if (preset === 'advanced') {
+        overrides.velocity_mag = velocityMag;
+        overrides.filter_type = filterType;
+        overrides.n_filter_tap = nFilterTap;
+        overrides.mode = processingMode;
+        if (manualFps !== null) {
+          overrides.fs = manualFps;
+        }
       }
 
       const response = await fetch(`${API_BASE}/api/preview`, {
@@ -258,9 +289,20 @@ const PresetWizard = ({ selectedVideo, onProcess }) => {
     }
     
     // Map temporal band if manual
-    if (manualBand) {
+    if (manualBand || preset === 'advanced') {
       overrides.fl = fl;
       overrides.fh = fh;
+    }
+
+    // Map advanced parameters if in advanced mode
+    if (preset === 'advanced') {
+      overrides.velocity_mag = velocityMag;
+      overrides.filter_type = filterType;
+      overrides.n_filter_tap = nFilterTap;
+      overrides.mode = processingMode;
+      if (manualFps !== null) {
+        overrides.fs = manualFps;
+      }
     }
 
     // Map trim parameters
@@ -527,6 +569,17 @@ const PresetWizard = ({ selectedVideo, onProcess }) => {
             setFl={setFl}
             fh={fh}
             setFh={setFh}
+            velocityMag={velocityMag}
+            setVelocityMag={setVelocityMag}
+            filterType={filterType}
+            setFilterType={setFilterType}
+            nFilterTap={nFilterTap}
+            setNFilterTap={setNFilterTap}
+            fps={fps}
+            manualFps={manualFps}
+            setManualFps={setManualFps}
+            processingMode={processingMode}
+            setProcessingMode={setProcessingMode}
           />
           <div className="bg-gray-50 p-4 rounded-lg border border-gray-300">
             <h3 className="font-bold mb-3">Save Custom Preset</h3>
