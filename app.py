@@ -19,6 +19,8 @@ import uvicorn
 import subprocess
 import preset_loader
 import auto_tuning
+import progress_tracker
+import uuid
 
 # Create necessary directories
 os.makedirs("data/uploads", exist_ok=True)
@@ -264,9 +266,20 @@ class ConvertROIRequest(BaseModel):
     uiROI: Dict[str, float]  # ROI in UI coordinates
     displayDimensions: Dict[str, float]  # Display container dimensions
 
+@app.get("/api/progress/{job_id}")
+async def get_progress(job_id: str):
+    """Get progress for a processing job"""
+    progress = progress_tracker.progress_tracker.get_progress(job_id)
+    if not progress:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return progress
+
 @app.post("/api/preview")
 async def generate_preview(request: PreviewRequest):
     """Generate a 2-3 second preview of processed video"""
+    job_id = str(uuid.uuid4())
+    progress_tracker.progress_tracker.create_job(job_id, "preview")
+    
     try:
         video_path = Path(request.videoPath.replace("/api/video/", "data/uploads/"))
         if not video_path.exists():
@@ -280,13 +293,16 @@ async def generate_preview(request: PreviewRequest):
         preview_output = preview_dir / f"{name}_preview.mp4"
         
         # Extract first 3 seconds of video
+        progress_tracker.progress_tracker.update_progress(job_id, 5, "extracting", "Extracting preview segment...")
         print(f"Extracting preview segment from: {video_path}")
         ffmpeg_cmd = f'ffmpeg -i "{video_path}" -t 3 -c copy "{preview_output}" -y'
         result = subprocess.run(ffmpeg_cmd, shell=True, capture_output=True, text=True)
         if result.returncode != 0:
+            progress_tracker.progress_tracker.set_status(job_id, "error", f"Failed to extract preview: {result.stderr}")
             raise HTTPException(status_code=500, detail=f"Failed to extract preview: {result.stderr}")
         
         # Process preview with same settings as full video
+        progress_tracker.progress_tracker.update_progress(job_id, 15, "analyzing", "Analyzing video...")
         preset = preset_loader.load_preset(request.preset)
         fps = auto_tuning.detect_video_fps(str(video_path))
         roi = auto_tuning.detect_roi(str(video_path))
@@ -311,9 +327,11 @@ async def generate_preview(request: PreviewRequest):
         preview_frames_dir.mkdir(parents=True, exist_ok=True)
         
         # Convert preview to frames
+        progress_tracker.progress_tracker.update_progress(job_id, 30, "converting", "Converting to frames...")
         ffmpeg_cmd = f'ffmpeg -i "{preview_output}" "{preview_frames_dir}/%06d.png"'
         result = subprocess.run(ffmpeg_cmd, shell=True, capture_output=True, text=True)
         if result.returncode != 0:
+            progress_tracker.progress_tracker.set_status(job_id, "error", f"Failed to convert preview to frames: {result.stderr}")
             raise HTTPException(status_code=500, detail=f"Failed to convert preview to frames: {result.stderr}")
         
         # Apply ROI cropping to preview if specified
@@ -354,10 +372,14 @@ async def generate_preview(request: PreviewRequest):
                 f'--amplification_factor={cli_args["amplification_factor"]}'
             )
         
+        progress_tracker.progress_tracker.update_progress(job_id, 40, "processing", "Processing frames with neural network...")
         print(f"Processing preview: {command}")
         result = subprocess.run(command, shell=True, capture_output=True, text=True)
         if result.returncode != 0:
+            progress_tracker.progress_tracker.set_status(job_id, "error", f"Preview processing failed: {result.stderr}")
             raise HTTPException(status_code=500, detail=f"Preview processing failed: {result.stderr}")
+        
+        progress_tracker.progress_tracker.update_progress(job_id, 80, "encoding", "Encoding output video...")
         
         # Find output video
         output_folder = f"{name}_preview_o3f_hmhm2_bg_qnoise_mix4_nl_n_t_ds3"
@@ -372,9 +394,11 @@ async def generate_preview(request: PreviewRequest):
         final_preview = preview_dir / f"{name}_processed_preview.mp4"
         shutil.copy2(output_file, final_preview)
         
+        progress_tracker.progress_tracker.set_status(job_id, "completed", "Preview generated successfully")
         return {
             "previewUrl": f"/api/preview/{final_preview.name}",
-            "message": "Preview generated successfully"
+            "message": "Preview generated successfully",
+            "jobId": job_id
         }
     except HTTPException:
         raise
@@ -554,6 +578,7 @@ async def process_video(http_request: Request):
         # Apply stabilization if needed
         processing_video_path = video_path
         if needs_stabilization:
+            progress_tracker.progress_tracker.update_progress(job_id, 5, "stabilizing", "Stabilizing video...")
             print("Applying video stabilization...")
             stabilized_path = Path("data/uploads") / f"{name}_stabilized.mp4"
             if auto_tuning.stabilize_video(str(video_path), str(stabilized_path)):
@@ -561,6 +586,8 @@ async def process_video(http_request: Request):
                 print("Video stabilized successfully")
             else:
                 print("Warning: Stabilization failed, using original video")
+        else:
+            progress_tracker.progress_tracker.update_progress(job_id, 5, "preparing", "Preparing video...")
         
         # Determine if ROI cropping is needed
         roi_to_apply = None
@@ -595,6 +622,7 @@ async def process_video(http_request: Request):
                     trim_params += f" -t {trim_end - (trim_start or 0)}"
         
         # Convert video to frames using ffmpeg
+        progress_tracker.progress_tracker.update_progress(job_id, 10, "extracting", "Extracting frames from video...")
         print(f"Converting video to frames...")
         print(f"Video path: {processing_video_path}")
         print(f"Output directory: {vid_dir}")
@@ -606,6 +634,7 @@ async def process_video(http_request: Request):
         if result.returncode != 0:
             error_msg = f"FFmpeg error: {result.stderr}\nStdout: {result.stdout}"
             print(error_msg)
+            progress_tracker.progress_tracker.set_status(job_id, "error", f"Failed to extract frames: {error_msg}")
             raise HTTPException(status_code=500, detail=f"Failed to extract frames: {error_msg}")
         
         # Build processing command
@@ -617,6 +646,7 @@ async def process_video(http_request: Request):
             preset = preset_loader.load_preset(preset_name)
             
             # Run auto-tuning (use processing video path which may be stabilized)
+            progress_tracker.progress_tracker.update_progress(job_id, 20, "analyzing", "Analyzing video properties...")
             print("Running auto-tuning analysis...")
             auto_detected_fps = auto_tuning.detect_video_fps(str(processing_video_path))
             # Use manual FPS override if provided
@@ -661,6 +691,7 @@ async def process_video(http_request: Request):
             
             # Apply ROI cropping if we have one
             if final_roi_for_cropping:
+                progress_tracker.progress_tracker.update_progress(job_id, 25, "cropping", "Cropping frames to ROI...")
                 print(f"Applying ROI crop to frames...")
                 if not auto_tuning.crop_frames_with_roi(str(vid_dir), final_roi_for_cropping):
                     print("Warning: ROI cropping failed, continuing with full frames")
@@ -732,21 +763,26 @@ async def process_video(http_request: Request):
                 folder = f"{name}_o3f_hmhm2_bg_qnoise_mix4_nl_n_t_ds3"
         
         # Run processing
+        progress_tracker.progress_tracker.update_progress(job_id, 30, "processing", "Processing frames with neural network (this may take a while)...")
         print(f"Processing video (this may take a while)...")
         try:
             result = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=3600)
+            progress_tracker.progress_tracker.update_progress(job_id, 80, "encoding", "Encoding output video...")
             if result.returncode != 0:
                 error_msg = result.stderr or result.stdout or "Unknown processing error"
                 if "CUDA" in error_msg or "GPU" in error_msg:
                     error_msg = "GPU processing error. Please ensure CUDA is properly configured or use CPU mode."
                 elif "Memory" in error_msg or "memory" in error_msg:
                     error_msg = "Insufficient memory. Try processing a shorter video or reducing resolution."
+                progress_tracker.progress_tracker.set_status(job_id, "error", f"Processing failed: {error_msg}")
                 raise HTTPException(status_code=500, detail=f"Processing failed: {error_msg}")
         except subprocess.TimeoutExpired:
+            progress_tracker.progress_tracker.set_status(job_id, "error", "Processing timed out")
             raise HTTPException(status_code=500, detail="Processing timed out. The video may be too long or complex. Try processing a shorter segment.")
         except Exception as e:
             if isinstance(e, HTTPException):
                 raise
+            progress_tracker.progress_tracker.set_status(job_id, "error", f"Processing error: {str(e)}")
             raise HTTPException(status_code=500, detail=f"Processing error: {str(e)}")
         
         # Check for output file
@@ -791,18 +827,21 @@ async def process_video(http_request: Request):
         else:
             print(f"Video re-encoded successfully: {final_output}")
         
+        progress_tracker.progress_tracker.set_status(job_id, "completed", "Video processed successfully")
         if use_preset:
             return {
                 "message": "Video processed successfully",
                 "outputPath": f"/api/video/{final_output.name}",
                 "preset": preset_name,
-                "resolvedParameters": cli_args
+                "resolvedParameters": cli_args,
+                "jobId": job_id
             }
         else:
             return {
                 "message": "Video processed successfully",
                 "outputPath": f"/api/video/{final_output.name}",
-                "inputParameters": request.inputParameters.dict()
+                "inputParameters": request.inputParameters.dict(),
+                "jobId": job_id
             }
         
     except HTTPException:

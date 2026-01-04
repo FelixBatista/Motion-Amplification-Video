@@ -38,6 +38,10 @@ const PresetWizard = ({ selectedVideo, onProcess }) => {
   const [nFilterTap, setNFilterTap] = useState(2);
   const [manualFps, setManualFps] = useState(null);
   const [processingMode, setProcessingMode] = useState('standard');
+  const [previewJobId, setPreviewJobId] = useState(null);
+  const [previewProgress, setPreviewProgress] = useState(null);
+  const [processJobId, setProcessJobId] = useState(null);
+  const [processProgress, setProcessProgress] = useState(null);
   const videoRef = useRef(null);
 
   // Load presets on mount
@@ -257,17 +261,65 @@ const PresetWizard = ({ selectedVideo, onProcess }) => {
 
       if (response.ok) {
         const data = await response.json();
-        setPreviewUrl(data.previewUrl);
+        if (data.jobId) {
+          setPreviewJobId(data.jobId);
+          setPreviewUrl(data.previewUrl); // Set URL immediately if provided
+          // Start polling for progress
+          pollPreviewProgress(data.jobId);
+        } else {
+          // Fallback if no jobId (old API)
+          setPreviewUrl(data.previewUrl);
+          setGeneratingPreview(false);
+        }
       } else {
         const error = await response.json();
         alert('Preview generation failed: ' + (error.detail || error.error || 'Unknown error'));
+        setGeneratingPreview(false);
       }
     } catch (error) {
       console.error('Preview generation error:', error);
       alert('Failed to generate preview: ' + error.message);
-    } finally {
       setGeneratingPreview(false);
     }
+  };
+
+  const pollPreviewProgress = async (jobId) => {
+    let pollCount = 0;
+    const maxPolls = 300; // 5 minutes max
+    
+    const pollInterval = setInterval(async () => {
+      pollCount++;
+      if (pollCount > maxPolls) {
+        clearInterval(pollInterval);
+        setGeneratingPreview(false);
+        alert('Preview generation timed out');
+        return;
+      }
+      
+      try {
+        const response = await fetch(`${API_BASE}/api/progress/${jobId}`);
+        if (response.ok) {
+          const progress = await response.json();
+          setPreviewProgress(progress);
+          
+          if (progress.status === 'completed') {
+            clearInterval(pollInterval);
+            setGeneratingPreview(false);
+            // Preview URL should already be set from initial response
+            // If not, we might need to reconstruct it
+          } else if (progress.status === 'error') {
+            clearInterval(pollInterval);
+            setGeneratingPreview(false);
+            alert('Preview generation failed: ' + progress.message);
+          }
+        }
+      } catch (error) {
+        console.error('Failed to poll progress:', error);
+      }
+    }, 1000); // Poll every second
+    
+    // Store interval for cleanup
+    return () => clearInterval(pollInterval);
   };
 
   const handleProcess = () => {
@@ -736,6 +788,19 @@ const PresetWizard = ({ selectedVideo, onProcess }) => {
           >
             {generatingPreview ? 'Generating Preview...' : 'Generate Preview (2-3 seconds)'}
           </button>
+          {generatingPreview && previewProgress && (
+            <div className="mt-4 space-y-2">
+              <div className="w-full bg-gray-200 rounded-full h-2.5">
+                <div 
+                  className="bg-blue-600 h-2.5 rounded-full transition-all duration-300" 
+                  style={{ width: `${previewProgress.progress}%` }}
+                ></div>
+              </div>
+              <p className="text-sm text-gray-600">
+                {previewProgress.current_step || previewProgress.message || 'Processing...'} ({previewProgress.progress}%)
+              </p>
+            </div>
+          )}
           {previewUrl && (
             <div className="mt-4">
               <p className="text-sm text-gray-600 mb-2">Preview:</p>
