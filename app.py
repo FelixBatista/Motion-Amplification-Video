@@ -542,6 +542,10 @@ async def process_video(http_request: Request):
     Detects format automatically based on request body.
     """
     try:
+        # Create job ID for progress tracking
+        job_id = str(uuid.uuid4())
+        progress_tracker.progress_tracker.create_job(job_id, "process")
+        
         # Parse request body
         body = await http_request.json()
         
