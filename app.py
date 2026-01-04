@@ -391,6 +391,14 @@ async def get_preview(filename: str):
         raise HTTPException(status_code=404, detail="Preview not found")
     return FileResponse(str(preview_path), media_type="video/mp4")
 
+@app.get("/api/heatmap/{filename}")
+async def get_heatmap(filename: str):
+    """Serve a motion energy heatmap image"""
+    heatmap_path = Path("data/heatmaps") / filename
+    if not heatmap_path.exists():
+        raise HTTPException(status_code=404, detail="Heatmap not found")
+    return FileResponse(str(heatmap_path), media_type="image/png")
+
 @app.post("/api/convert-roi")
 async def convert_roi(request: ConvertROIRequest):
     """Convert ROI coordinates from UI space to video pixel space"""
@@ -441,6 +449,14 @@ async def analyze_video(request: AnalyzeRequest):
         roi = auto_tuning.detect_roi(str(video_path))
         print(f"Detected ROI: {roi}")
         
+        # Generate motion energy heatmap
+        heatmap_path = auto_tuning.generate_motion_energy_heatmap(str(video_path))
+        heatmap_url = None
+        if heatmap_path:
+            heatmap_filename = Path(heatmap_path).name
+            heatmap_url = f"/api/heatmap/{heatmap_filename}"
+            print(f"Generated motion heatmap: {heatmap_url}")
+        
         # Detect frequencies
         frequencies = auto_tuning.detect_dominant_frequencies(str(video_path), roi, fps)
         print(f"Detected frequencies: {frequencies}")
@@ -457,7 +473,8 @@ async def analyze_video(request: AnalyzeRequest):
             "roi": roi,
             "frequencies": frequencies,
             "suggested_mode": suggested_mode,
-            "suggested_amplification": suggested_amplification
+            "suggested_amplification": suggested_amplification,
+            "motionHeatmapUrl": heatmap_url
         }
     except Exception as e:
         import traceback

@@ -310,8 +310,62 @@ def detect_dominant_frequencies(video_path: str, roi: Optional[Dict[str, int]] =
         return []
 
 
+def compute_artifact_metrics(processed_frames: List[np.ndarray]) -> Dict[str, float]:
+    """
+    Compute artifact metrics for processed frames.
+    
+    Args:
+        processed_frames: List of processed frame arrays (normalized -1 to 1)
+        
+    Returns:
+        Dictionary with artifact metrics
+    """
+    if not processed_frames or len(processed_frames) < 2:
+        return {"saturation": 1.0, "flicker": 1.0, "edge_tearing": 1.0}
+    
+    frames = np.array(processed_frames)
+    
+    # Convert from -1 to 1 range to 0-255 for analysis
+    frames_uint8 = ((frames + 1.0) * 127.5).astype(np.uint8)
+    
+    # 1. Saturation metric: % of pixels at extremes (0 or 255)
+    saturation_mask = (frames_uint8 == 0) | (frames_uint8 == 255)
+    saturation_ratio = np.mean(saturation_mask)
+    
+    # 2. Temporal flicker: variance across time dimension
+    if len(frames) > 1:
+        frame_mean = np.mean(frames_uint8, axis=0)
+        temporal_variance = np.var(frames_uint8, axis=0)
+        flicker_energy = np.mean(temporal_variance) / 255.0  # Normalize
+    else:
+        flicker_energy = 0.0
+    
+    # 3. Edge tearing: high-frequency spatial artifacts
+    # Compute Laplacian to detect edges, then check for excessive high-frequency content
+    edge_scores = []
+    for frame in frames_uint8[:min(5, len(frames_uint8))]:  # Sample first 5 frames
+        if len(frame.shape) == 2:
+            laplacian = cv2.Laplacian(frame, cv2.CV_64F)
+        else:
+            gray = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY) if len(frame.shape) == 3 else frame
+            laplacian = cv2.Laplacian(gray, cv2.CV_64F)
+        # High variance in Laplacian indicates edge tearing
+        edge_variance = np.var(np.abs(laplacian))
+        edge_scores.append(edge_variance)
+    
+    edge_tearing = np.mean(edge_scores) / 10000.0  # Normalize (rough scaling)
+    edge_tearing = min(1.0, edge_tearing)  # Cap at 1.0
+    
+    return {
+        "saturation": float(saturation_ratio),
+        "flicker": float(flicker_energy),
+        "edge_tearing": float(edge_tearing)
+    }
+
+
 def find_safe_amplification(video_path: str, roi: Optional[Dict[str, int]] = None,
-                           preview_seconds: int = 3, fs: float = 30.0) -> int:
+                           preview_seconds: int = 3, fs: float = 30.0,
+                           model_checkpoint: str = None) -> int:
     """
     Find safe amplification factor by processing preview and detecting artifacts.
     
@@ -320,16 +374,105 @@ def find_safe_amplification(video_path: str, roi: Optional[Dict[str, int]] = Non
         roi: Optional ROI dictionary
         preview_seconds: Number of seconds to preview
         fs: Frame rate
+        model_checkpoint: Path to model checkpoint (optional, for full processing)
         
     Returns:
         Safe amplification factor (integer)
     """
-    # For now, return a conservative default
-    # Full implementation would require processing preview frames
-    # and computing artifact metrics (saturation, flicker, edge tearing)
-    
-    # Conservative default based on common good results
-    return 30
+    try:
+        # Extract preview segment
+        preview_frames_dir = Path("data/temp_preview_amp")
+        preview_frames_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Extract first N seconds
+        preview_video = preview_frames_dir / "preview.mp4"
+        ffmpeg_cmd = f'ffmpeg -i "{video_path}" -t {preview_seconds} -c copy "{preview_video}" -y'
+        result = subprocess.run(ffmpeg_cmd, shell=True, capture_output=True, text=True)
+        if result.returncode != 0:
+            print(f"Warning: Could not extract preview: {result.stderr}")
+            return 30  # Default fallback
+        
+        # Convert to frames
+        ffmpeg_cmd = f'ffmpeg -i "{preview_video}" "{preview_frames_dir}/%06d.png"'
+        result = subprocess.run(ffmpeg_cmd, shell=True, capture_output=True, text=True)
+        if result.returncode != 0:
+            print(f"Warning: Could not convert preview to frames: {result.stderr}")
+            return 30
+        
+        # Get frame files
+        import glob
+        frame_files = sorted(glob.glob(str(preview_frames_dir / "*.png")))
+        if len(frame_files) < 2:
+            return 30
+        
+        # For now, use a simplified approach without full neural network processing
+        # Analyze frame differences at different "virtual" amplification levels
+        # This is a proxy for actual amplification artifacts
+        
+        test_factors = [10, 20, 30, 40, 50]
+        safe_factor = 30  # Default
+        
+        # Load frames
+        frames = []
+        for frame_file in frame_files[:min(10, len(frame_files))]:  # Sample first 10 frames
+            frame = cv2.imread(frame_file)
+            if frame is not None:
+                frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                frames.append(frame)
+        
+        if len(frames) < 2:
+            return 30
+        
+        # Test each amplification factor
+        for factor in test_factors:
+            # Simulate amplification by enhancing frame differences
+            amplified_frames = []
+            prev_frame = None
+            
+            for frame in frames:
+                if prev_frame is not None:
+                    # Compute difference and amplify
+                    diff = (frame.astype(np.float32) - prev_frame.astype(np.float32)) * (factor / 30.0)
+                    amplified = np.clip(prev_frame.astype(np.float32) + diff, 0, 255).astype(np.uint8)
+                    amplified_frames.append(amplified)
+                prev_frame = frame
+            
+            if len(amplified_frames) < 2:
+                continue
+            
+            # Normalize to -1 to 1 range for metric computation
+            normalized = [(f.astype(np.float32) / 127.5) - 1.0 for f in amplified_frames]
+            
+            # Compute artifact metrics
+            metrics = compute_artifact_metrics(normalized)
+            
+            # Thresholds for "safe"
+            saturation_threshold = 0.15  # 15% pixels saturating
+            flicker_threshold = 0.3
+            edge_threshold = 0.5
+            
+            # Check if this factor is safe
+            if (metrics["saturation"] < saturation_threshold and 
+                metrics["flicker"] < flicker_threshold and
+                metrics["edge_tearing"] < edge_threshold):
+                safe_factor = factor
+            else:
+                # Factor is too high, stop here
+                break
+        
+        # Cleanup
+        try:
+            import shutil
+            shutil.rmtree(preview_frames_dir, ignore_errors=True)
+        except:
+            pass
+        
+        return safe_factor
+        
+    except Exception as e:
+        print(f"Warning: Safe amplification detection failed: {e}")
+        # Conservative default
+        return 30
 
 
 def auto_choose_mode(frequencies: List[Dict[str, float]], 
@@ -447,6 +590,76 @@ def crop_frames_with_roi(frames_dir: str, roi: Dict[str, int]) -> bool:
     except Exception as e:
         print(f"Warning: Frame cropping failed: {e}")
         return False
+
+
+def generate_motion_energy_heatmap(video_path: str, sample_frames: int = 30) -> Optional[str]:
+    """
+    Generate a motion energy heatmap image showing where motion is detected.
+    
+    Args:
+        video_path: Path to video file
+        sample_frames: Number of frames to sample for analysis
+        
+    Returns:
+        Path to generated heatmap image, or None if failed
+    """
+    try:
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            return None
+        
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        
+        # Sample frames evenly throughout video
+        frame_indices = np.linspace(0, total_frames - 1, sample_frames, dtype=int)
+        
+        prev_frame = None
+        motion_energy = np.zeros((frame_height, frame_width), dtype=np.float32)
+        
+        for idx in frame_indices:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
+            ret, frame = cap.read()
+            if not ret:
+                continue
+            
+            # Convert to grayscale
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) if len(frame.shape) == 3 else frame
+            
+            if prev_frame is not None:
+                # Compute frame difference
+                diff = cv2.absdiff(gray, prev_frame)
+                motion_energy += diff.astype(np.float32)
+            
+            prev_frame = gray
+        
+        cap.release()
+        
+        if motion_energy.max() == 0:
+            return None
+        
+        # Normalize motion energy to 0-255
+        motion_normalized = (motion_energy / motion_energy.max() * 255).astype(np.uint8)
+        
+        # Apply colormap for visualization (hot colormap: black->red->yellow->white)
+        heatmap = cv2.applyColorMap(motion_normalized, cv2.COLORMAP_HOT)
+        
+        # Blend with original video frame for context (optional - for now just return heatmap)
+        # Save heatmap
+        heatmap_dir = Path("data/heatmaps")
+        heatmap_dir.mkdir(parents=True, exist_ok=True)
+        
+        video_name = Path(video_path).stem
+        heatmap_path = heatmap_dir / f"{video_name}_motion_heatmap.png"
+        
+        cv2.imwrite(str(heatmap_path), heatmap)
+        
+        return str(heatmap_path)
+        
+    except Exception as e:
+        print(f"Warning: Could not generate motion heatmap: {e}")
+        return None
 
 
 def stabilize_video(video_path: str, output_path: str) -> bool:

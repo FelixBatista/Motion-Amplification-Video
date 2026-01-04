@@ -26,6 +26,8 @@ const PresetWizard = ({ selectedVideo, onProcess }) => {
   const [savingPreset, setSavingPreset] = useState(false);
   const [presetName, setPresetName] = useState('');
   const [showSavePreset, setShowSavePreset] = useState(false);
+  const [heatmapUrl, setHeatmapUrl] = useState(null);
+  const [showHeatmap, setShowHeatmap] = useState(true);
   const videoRef = useRef(null);
 
   // Load presets on mount
@@ -66,6 +68,11 @@ const PresetWizard = ({ selectedVideo, onProcess }) => {
         if (data.roi && data.roi.w > 0) {
           setRoiCoords(data.roi);
           // Note: Auto-detected ROI is already in video pixel coordinates
+        }
+        
+        // Set heatmap URL if available
+        if (data.motionHeatmapUrl) {
+          setHeatmapUrl(data.motionHeatmapUrl);
         }
         
         // Auto-suggest temporal mode
@@ -256,10 +263,16 @@ const PresetWizard = ({ selectedVideo, onProcess }) => {
             {analyzing ? (
               <p className="mt-2 text-sm text-blue-600">Analyzing video...</p>
             ) : analysisResults ? (
-              <div className="mt-2 text-sm">
+              <div className="mt-2 text-sm space-y-1">
                 <p>FPS: {fps} Hz</p>
                 {analysisResults.frequencies && analysisResults.frequencies.length > 0 && (
                   <p>Detected frequencies: {analysisResults.frequencies.map(f => `${f.freq.toFixed(2)} Hz`).join(', ')}</p>
+                )}
+                {analysisResults.suggested_amplification && (
+                  <p>Suggested amplification: {analysisResults.suggested_amplification}x</p>
+                )}
+                {heatmapUrl && (
+                  <p className="text-blue-600">✓ Motion heatmap generated</p>
                 )}
               </div>
             ) : null}
@@ -284,7 +297,7 @@ const PresetWizard = ({ selectedVideo, onProcess }) => {
     <div className="space-y-4">
       <h2 className="text-2xl font-bold">Step 2: Select Region (Optional)</h2>
       <div className="bg-light p-4 rounded-lg">
-        <div className="mb-4">
+        <div className="mb-4 space-y-2">
           <label className="flex items-center">
             <input
               type="checkbox"
@@ -294,11 +307,36 @@ const PresetWizard = ({ selectedVideo, onProcess }) => {
             />
             <span>Auto-detect region (recommended)</span>
           </label>
+          {roi === 'auto' && heatmapUrl && (
+            <label className="flex items-center text-sm text-gray-600">
+              <input
+                type="checkbox"
+                checked={showHeatmap}
+                onChange={(e) => setShowHeatmap(e.target.checked)}
+                className="mr-2"
+              />
+              <span>Show motion energy heatmap</span>
+            </label>
+          )}
         </div>
         {selectedVideo && (
           <div className="relative">
             <div className="relative w-full" style={{ maxHeight: '500px' }} ref={videoRef}>
               <DisplayVideo selectedVideo={selectedVideo} />
+              {roi === 'auto' && showHeatmap && heatmapUrl && (
+                <div 
+                  className="absolute inset-0 pointer-events-none z-10"
+                  style={{
+                    backgroundImage: `url(${API_BASE}${heatmapUrl})`,
+                    backgroundSize: 'contain',
+                    backgroundPosition: 'center',
+                    backgroundRepeat: 'no-repeat',
+                    opacity: 0.6,
+                    mixBlendMode: 'screen'
+                  }}
+                  title="Motion Energy Heatmap - Red/Yellow areas show high motion"
+                />
+              )}
               {roi === 'manual' && (
                 <ROISelector
                   videoElement={videoRef.current?.querySelector('video')}
