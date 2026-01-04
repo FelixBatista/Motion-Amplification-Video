@@ -573,15 +573,18 @@ async def process_video(http_request: Request):
         
         # Check if stabilization is needed (for preset-based processing)
         needs_stabilization = False
-        if use_preset:
-            preset_obj = preset_loader.load_preset(preset_name)
-            stabilization_setting = preset_obj.get('run', {}).get('stabilization', 'auto')
-            if stabilization_setting == 'on' or (stabilization_setting == 'auto' and preset_name != 'heartbeat_auto'):
-                needs_stabilization = True
+        skip_stabilization = overrides.get('skipStabilization', False) if (use_preset and overrides) else False
+        
+        if not skip_stabilization:
+            if use_preset and preset_name != 'advanced':
+                preset_obj = preset_loader.load_preset(preset_name)
+                stabilization_setting = preset_obj.get('run', {}).get('stabilization', 'auto')
+                if stabilization_setting == 'on' or (stabilization_setting == 'auto' and preset_name != 'heartbeat_auto'):
+                    needs_stabilization = True
         
         # Apply stabilization if needed
         processing_video_path = video_path
-        if needs_stabilization:
+        if needs_stabilization and not skip_stabilization:
             progress_tracker.progress_tracker.update_progress(job_id, 5, "stabilizing", "Stabilizing video...")
             print("Applying video stabilization...")
             stabilized_path = Path("data/uploads") / f"{name}_stabilized.mp4"
@@ -646,38 +649,127 @@ async def process_video(http_request: Request):
             # New preset-based flow
             print(f"Using preset: {preset_name}")
             
-            # Load preset
-            preset = preset_loader.load_preset(preset_name)
-            
-            # Run auto-tuning (use processing video path which may be stabilized)
-            progress_tracker.progress_tracker.update_progress(job_id, 20, "analyzing", "Analyzing video properties...")
-            print("Running auto-tuning analysis...")
-            auto_detected_fps = auto_tuning.detect_video_fps(str(processing_video_path))
-            # Use manual FPS override if provided
-            fps = overrides.get('fs', auto_detected_fps) if overrides else auto_detected_fps
-            roi = auto_tuning.detect_roi(str(processing_video_path))
-            frequencies = auto_tuning.detect_dominant_frequencies(str(processing_video_path), roi, fps)
-            suggested_amplification = auto_tuning.find_safe_amplification(str(processing_video_path), roi, fs=fps)
-            
-            video_metadata = {"fps": fps}
-            auto_tuning_results = {
-                "roi": roi,
-                "frequencies": frequencies,
-                "suggested_amplification": suggested_amplification
-            }
-            
-            # Resolve auto values
-            resolved_preset = preset_loader.resolve_auto_values(preset, video_metadata, auto_tuning_results)
-            
-            # Determine final ROI for cropping (manual override takes precedence)
-            final_roi_for_cropping = roi_to_apply
-            if not final_roi_for_cropping:
-                # Check if auto-detected ROI should be used
-                resolved_roi = resolved_preset.get('run', {}).get('roi', 'auto')
-                if resolved_roi and resolved_roi != 'auto':
+            # Handle advanced mode specially (no preset file, use overrides directly)
+            if preset_name == 'advanced':
+                # Advanced mode: build command directly from overrides
+                progress_tracker.progress_tracker.update_progress(job_id, 20, "analyzing", "Processing with advanced settings...")
+                print("Using advanced mode with manual parameters")
+                
+                # Get video FPS for advanced mode
+                auto_detected_fps = auto_tuning.detect_video_fps(str(processing_video_path))
+                fps = overrides.get('fs', auto_detected_fps) if overrides else auto_detected_fps
+                
+                # Handle ROI cropping if provided
+                roi_to_apply = None
+                if overrides and 'roi' in overrides and overrides['roi'] != 'auto':
                     try:
-                        # Parse ROI string "x,y,w,h"
-                        parts = resolved_roi.split(',')
+                        roi_str = overrides['roi']
+                        parts = roi_str.split(',')
+                        if len(parts) == 4:
+                            roi_to_apply = {
+                                "x": int(float(parts[0])),
+                                "y": int(float(parts[1])),
+                                "w": int(float(parts[2])),
+                                "h": int(float(parts[3]))
+                            }
+                            print(f"Applying ROI crop: {roi_to_apply}")
+                    except (ValueError, IndexError):
+                        pass
+                
+                # Apply ROI cropping if we have one
+                if roi_to_apply:
+                    progress_tracker.progress_tracker.update_progress(job_id, 25, "cropping", "Cropping frames to ROI...")
+                    print(f"Applying ROI crop to frames...")
+                    if not auto_tuning.crop_frames_with_roi(str(vid_dir), roi_to_apply):
+                        print("Warning: ROI cropping failed, continuing with full frames")
+                
+                # Build command from overrides
+                mode = overrides.get('mode', 'temporal')
+                config_file = "configs/models/magnet_default.conf"
+                config_file_quoted = f'"{config_file}"'
+                vid_dir_quoted = f'"{vid_dir}"'
+                out_dir_base = f"data/output/{name}_advanced"
+                out_dir_quoted = f'"{out_dir_base}"'
+                python_cmd = "py -3.10"
+                
+                amplification_factor = overrides.get('strength', 30)
+                
+                # Create cli_args for return value
+                cli_args = {
+                    'config_file': config_file,
+                    'vid_dir': str(vid_dir),
+                    'frame_ext': 'png',
+                    'out_dir': out_dir_base,
+                    'amplification_factor': amplification_factor
+                }
+                
+                if mode == 'temporal' or mode == 'run_temporal':
+                    fl = overrides.get('fl', 0.04)
+                    fh = overrides.get('fh', 0.4)
+                    n_filter_tap = overrides.get('n_filter_tap', 2)
+                    filter_type = overrides.get('filter_type', 'differenceOfIIR')
+                    velocity_mag = overrides.get('velocity_mag', False)
+                    velocity_mag_flag = '--velocity_mag' if velocity_mag else ''
+                    
+                    # Add temporal parameters to cli_args
+                    cli_args.update({
+                        'phase': 'run_temporal',
+                        'fl': fl,
+                        'fh': fh,
+                        'fs': fps,
+                        'n_filter_tap': n_filter_tap,
+                        'filter_type': filter_type,
+                        'velocity_mag': velocity_mag
+                    })
+                    
+                    command = (
+                        f'{python_cmd} main.py --config_file={config_file_quoted} --phase=run_temporal '
+                        f'--vid_dir={vid_dir_quoted} --out_dir={out_dir_quoted} '
+                        f'--amplification_factor={amplification_factor} '
+                        f'--fl={fl} --fh={fh} --fs={fps} '
+                        f'--n_filter_tap={n_filter_tap} --filter_type={filter_type}'
+                        f' {velocity_mag_flag}'
+                    ).strip()
+                    folder = f"{name}_advanced_fl{fl}_fh{fh}_fs{fps}_n{n_filter_tap}_{filter_type}"
+                else:
+                    cli_args['phase'] = 'run'
+                    command = (
+                        f'{python_cmd} main.py --config_file={config_file_quoted} --phase=run '
+                        f'--vid_dir={vid_dir_quoted} --out_dir={out_dir_quoted} '
+                        f'--amplification_factor={amplification_factor}'
+                    )
+                    folder = f"{name}_advanced"
+            else:
+                # Load preset for normal presets
+                preset = preset_loader.load_preset(preset_name)
+                
+                # Run auto-tuning (use processing video path which may be stabilized)
+                progress_tracker.progress_tracker.update_progress(job_id, 20, "analyzing", "Analyzing video properties...")
+                print("Running auto-tuning analysis...")
+                auto_detected_fps = auto_tuning.detect_video_fps(str(processing_video_path))
+                # Use manual FPS override if provided
+                fps = overrides.get('fs', auto_detected_fps) if overrides else auto_detected_fps
+                roi = auto_tuning.detect_roi(str(processing_video_path))
+                frequencies = auto_tuning.detect_dominant_frequencies(str(processing_video_path), roi, fps)
+                suggested_amplification = auto_tuning.find_safe_amplification(str(processing_video_path), roi, fs=fps)
+                
+                video_metadata = {"fps": fps}
+                auto_tuning_results = {
+                    "roi": roi,
+                    "frequencies": frequencies,
+                    "suggested_amplification": suggested_amplification
+                }
+                
+                # Resolve auto values
+                resolved_preset = preset_loader.resolve_auto_values(preset, video_metadata, auto_tuning_results)
+                
+                # Determine final ROI for cropping (manual override takes precedence)
+                final_roi_for_cropping = None
+                # Check for manual ROI override first
+                if overrides and 'roi' in overrides and overrides['roi'] != 'auto':
+                    try:
+                        roi_str = overrides['roi']
+                        parts = roi_str.split(',')
                         if len(parts) == 4:
                             final_roi_for_cropping = {
                                 "x": int(float(parts[0])),
@@ -685,53 +777,70 @@ async def process_video(http_request: Request):
                                 "w": int(float(parts[2])),
                                 "h": int(float(parts[3]))
                             }
-                            print(f"Using auto-detected ROI for cropping: {final_roi_for_cropping}")
                     except (ValueError, IndexError):
                         pass
-                elif roi and roi.get("w", 0) > 0:
-                    # Use directly detected ROI (already in video coordinates)
-                    final_roi_for_cropping = roi
-                    print(f"Using directly detected ROI for cropping: {final_roi_for_cropping}")
-            
-            # Apply ROI cropping if we have one
-            if final_roi_for_cropping:
-                progress_tracker.progress_tracker.update_progress(job_id, 25, "cropping", "Cropping frames to ROI...")
-                print(f"Applying ROI crop to frames...")
-                if not auto_tuning.crop_frames_with_roi(str(vid_dir), final_roi_for_cropping):
-                    print("Warning: ROI cropping failed, continuing with full frames")
-            
-            # Convert to CLI args
-            cli_args = preset_loader.preset_to_cli_args(resolved_preset, 
-                                                       model_config_path="configs/models/magnet_default.conf",
-                                                       video_name=name,
-                                                       overrides=overrides)
-            
-            # Build command from CLI args
-            config_file = cli_args['config_file']
-            config_file_quoted = f'"{config_file}"'
-            vid_dir_quoted = f'"{vid_dir}"'
-            out_dir_quoted = f'"{cli_args["out_dir"]}"'
-            python_cmd = "py -3.10"
-            
-            if cli_args['phase'] == 'run_temporal':
-                # Use velocity_mag if specified
-                velocity_mag_flag = '--velocity_mag' if cli_args.get('velocity_mag', False) else ''
-                command = (
-                    f'{python_cmd} main.py --config_file={config_file_quoted} --phase=run_temporal '
-                    f'--vid_dir={vid_dir_quoted} --out_dir={out_dir_quoted} '
-                    f'--amplification_factor={cli_args["amplification_factor"]} '
-                    f'--fl={cli_args["fl"]} --fh={cli_args["fh"]} --fs={fps} '
-                    f'--n_filter_tap={cli_args["n_filter_tap"]} --filter_type={cli_args["filter_type"]}'
-                    f' {velocity_mag_flag}'
-                ).strip()
-                folder = f"{name}_o3f_hmhm2_bg_qnoise_mix4_nl_n_t_ds3_fl{cli_args['fl']}_fh{cli_args['fh']}_fs{fps}_n{cli_args['n_filter_tap']}_{cli_args['filter_type']}"
-            else:
-                command = (
-                    f'{python_cmd} main.py --config_file={config_file_quoted} --phase=run '
-                    f'--vid_dir={vid_dir_quoted} --out_dir={out_dir_quoted} '
-                    f'--amplification_factor={cli_args["amplification_factor"]}'
-                )
-                folder = f"{name}_o3f_hmhm2_bg_qnoise_mix4_nl_n_t_ds3"
+                
+                if not final_roi_for_cropping:
+                    # Check if auto-detected ROI should be used
+                    resolved_roi = resolved_preset.get('run', {}).get('roi', 'auto')
+                    if resolved_roi and resolved_roi != 'auto':
+                        try:
+                            # Parse ROI string "x,y,w,h"
+                            parts = resolved_roi.split(',')
+                            if len(parts) == 4:
+                                final_roi_for_cropping = {
+                                    "x": int(float(parts[0])),
+                                    "y": int(float(parts[1])),
+                                    "w": int(float(parts[2])),
+                                    "h": int(float(parts[3]))
+                                }
+                                print(f"Using auto-detected ROI for cropping: {final_roi_for_cropping}")
+                        except (ValueError, IndexError):
+                            pass
+                    elif roi and roi.get("w", 0) > 0:
+                        # Use directly detected ROI (already in video coordinates)
+                        final_roi_for_cropping = roi
+                        print(f"Using directly detected ROI for cropping: {final_roi_for_cropping}")
+                
+                # Apply ROI cropping if we have one
+                if final_roi_for_cropping:
+                    progress_tracker.progress_tracker.update_progress(job_id, 25, "cropping", "Cropping frames to ROI...")
+                    print(f"Applying ROI crop to frames...")
+                    if not auto_tuning.crop_frames_with_roi(str(vid_dir), final_roi_for_cropping):
+                        print("Warning: ROI cropping failed, continuing with full frames")
+                
+                # Convert to CLI args
+                cli_args = preset_loader.preset_to_cli_args(resolved_preset, 
+                                                           model_config_path="configs/models/magnet_default.conf",
+                                                           video_name=name,
+                                                           overrides=overrides)
+                
+                # Build command from CLI args
+                config_file = cli_args['config_file']
+                config_file_quoted = f'"{config_file}"'
+                vid_dir_quoted = f'"{vid_dir}"'
+                out_dir_quoted = f'"{cli_args["out_dir"]}"'
+                python_cmd = "py -3.10"
+                
+                if cli_args['phase'] == 'run_temporal':
+                    # Use velocity_mag if specified
+                    velocity_mag_flag = '--velocity_mag' if cli_args.get('velocity_mag', False) else ''
+                    command = (
+                        f'{python_cmd} main.py --config_file={config_file_quoted} --phase=run_temporal '
+                        f'--vid_dir={vid_dir_quoted} --out_dir={out_dir_quoted} '
+                        f'--amplification_factor={cli_args["amplification_factor"]} '
+                        f'--fl={cli_args["fl"]} --fh={cli_args["fh"]} --fs={fps} '
+                        f'--n_filter_tap={cli_args["n_filter_tap"]} --filter_type={cli_args["filter_type"]}'
+                        f' {velocity_mag_flag}'
+                    ).strip()
+                    folder = f"{name}_o3f_hmhm2_bg_qnoise_mix4_nl_n_t_ds3_fl{cli_args['fl']}_fh{cli_args['fh']}_fs{fps}_n{cli_args['n_filter_tap']}_{cli_args['filter_type']}"
+                else:
+                    command = (
+                        f'{python_cmd} main.py --config_file={config_file_quoted} --phase=run '
+                        f'--vid_dir={vid_dir_quoted} --out_dir={out_dir_quoted} '
+                        f'--amplification_factor={cli_args["amplification_factor"]}'
+                    )
+                    folder = f"{name}_o3f_hmhm2_bg_qnoise_mix4_nl_n_t_ds3"
         else:
             # Legacy format
             params = request.inputParameters
@@ -766,33 +875,77 @@ async def process_video(http_request: Request):
                 )
                 folder = f"{name}_o3f_hmhm2_bg_qnoise_mix4_nl_n_t_ds3"
         
-        # Run processing
-        progress_tracker.progress_tracker.update_progress(job_id, 30, "processing", "Processing frames with neural network (this may take a while)...")
-        print(f"Processing video (this may take a while)...")
-        try:
-            result = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=3600)
-            progress_tracker.progress_tracker.update_progress(job_id, 80, "encoding", "Encoding output video...")
-            if result.returncode != 0:
-                error_msg = result.stderr or result.stdout or "Unknown processing error"
-                if "CUDA" in error_msg or "GPU" in error_msg:
-                    error_msg = "GPU processing error. Please ensure CUDA is properly configured or use CPU mode."
-                elif "Memory" in error_msg or "memory" in error_msg:
-                    error_msg = "Insufficient memory. Try processing a shorter video or reducing resolution."
-                progress_tracker.progress_tracker.set_status(job_id, "error", f"Processing failed: {error_msg}")
-                raise HTTPException(status_code=500, detail=f"Processing failed: {error_msg}")
-        except subprocess.TimeoutExpired:
-            progress_tracker.progress_tracker.set_status(job_id, "error", "Processing timed out")
-            raise HTTPException(status_code=500, detail="Processing timed out. The video may be too long or complex. Try processing a shorter segment.")
-        except Exception as e:
-            if isinstance(e, HTTPException):
-                raise
-            progress_tracker.progress_tracker.set_status(job_id, "error", f"Processing error: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"Processing error: {str(e)}")
+        # Check if processing should be skipped
+        skip_processing = overrides.get('skipProcessing', False) if (use_preset and overrides) else False
+        if use_preset and not overrides:
+            skip_processing = False
         
-        # Check for output file
-        output_file = Path(f"data/output/{folder}/{folder}_259002.mp4")
-        if not output_file.exists():
-            raise HTTPException(status_code=500, detail="Processing completed but output file not found. Check the output directory for generated files.")
+        if skip_processing:
+            # Skip neural network processing - just convert frames back to video
+            # Get FPS for encoding (detect if not already available)
+            try:
+                # For advanced mode, fps is already set
+                if use_preset and preset_name == 'advanced' and 'fps' in locals():
+                    fps_for_encode = fps
+                else:
+                    # Detect FPS from video
+                    fps_for_encode = auto_tuning.detect_video_fps(str(processing_video_path))
+            except Exception as e:
+                print(f"Warning: Could not detect FPS, using default 30: {e}")
+                fps_for_encode = 30
+            
+            progress_tracker.progress_tracker.update_progress(job_id, 50, "encoding", "Encoding output video from frames (skipping neural network processing)...")
+            print("Skipping neural network processing - converting frames directly to video...")
+            
+            # Create output directory
+            output_dir = Path(f"data/output/{name}_no_processing")
+            output_dir.mkdir(parents=True, exist_ok=True)
+            output_file = output_dir / f"{name}_no_processing_259002.mp4"
+            folder = f"{name}_no_processing"
+            
+            # Convert frames to video using FFmpeg
+            frame_pattern = str(vid_dir / "%06d.png")
+            encode_cmd = (
+                f'ffmpeg -y -framerate {fps_for_encode} -i "{frame_pattern}" '
+                f'-c:v libx264 -preset fast -crf 18 -pix_fmt yuv420p -profile:v baseline -level 3.0 '
+                f'-an -movflags +faststart "{output_file}"'
+            )
+            print(f"Encoding command: {encode_cmd}")
+            result = subprocess.run(encode_cmd, shell=True, capture_output=True, text=True)
+            if result.returncode != 0:
+                error_msg = f"Failed to encode video from frames: {result.stderr[:200]}"
+                print(error_msg)
+                progress_tracker.progress_tracker.set_status(job_id, "error", error_msg)
+                raise HTTPException(status_code=500, detail=error_msg)
+            print("Video encoded successfully from frames")
+        else:
+            # Run neural network processing
+            progress_tracker.progress_tracker.update_progress(job_id, 30, "processing", "Processing frames with neural network (this may take a while)...")
+            print(f"Processing video (this may take a while)...")
+            try:
+                result = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=3600)
+                progress_tracker.progress_tracker.update_progress(job_id, 80, "encoding", "Encoding output video...")
+                if result.returncode != 0:
+                    error_msg = result.stderr or result.stdout or "Unknown processing error"
+                    if "CUDA" in error_msg or "GPU" in error_msg:
+                        error_msg = "GPU processing error. Please ensure CUDA is properly configured or use CPU mode."
+                    elif "Memory" in error_msg or "memory" in error_msg:
+                        error_msg = "Insufficient memory. Try processing a shorter video or reducing resolution."
+                    progress_tracker.progress_tracker.set_status(job_id, "error", f"Processing failed: {error_msg}")
+                    raise HTTPException(status_code=500, detail=f"Processing failed: {error_msg}")
+            except subprocess.TimeoutExpired:
+                progress_tracker.progress_tracker.set_status(job_id, "error", "Processing timed out")
+                raise HTTPException(status_code=500, detail="Processing timed out. The video may be too long or complex. Try processing a shorter segment.")
+            except Exception as e:
+                if isinstance(e, HTTPException):
+                    raise
+                progress_tracker.progress_tracker.set_status(job_id, "error", f"Processing error: {str(e)}")
+                raise HTTPException(status_code=500, detail=f"Processing error: {str(e)}")
+            
+            # Check for output file
+            output_file = Path(f"data/output/{folder}/{folder}_259002.mp4")
+            if not output_file.exists():
+                raise HTTPException(status_code=500, detail="Processing completed but output file not found. Check the output directory for generated files.")
         
         # Re-encode video for Windows compatibility (H.264 with proper pixel format)
         print(f"Re-encoding video for Windows compatibility...")

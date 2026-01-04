@@ -42,6 +42,8 @@ const PresetWizard = ({ selectedVideo, onProcess }) => {
   const [previewProgress, setPreviewProgress] = useState(null);
   const [processJobId, setProcessJobId] = useState(null);
   const [processProgress, setProcessProgress] = useState(null);
+  const [enableStabilization, setEnableStabilization] = useState(true);
+  const [enableProcessing, setEnableProcessing] = useState(true);
   const videoRef = useRef(null);
 
   // Load presets on mount
@@ -361,6 +363,14 @@ const PresetWizard = ({ selectedVideo, onProcess }) => {
     if (enableTrim && (trimStart > 0 || trimEnd < videoDuration)) {
       overrides.trimStart = trimStart;
       overrides.trimEnd = trimEnd;
+    }
+
+    // Map stabilization and processing flags
+    if (!enableStabilization) {
+      overrides.skipStabilization = true;
+    }
+    if (!enableProcessing) {
+      overrides.skipProcessing = true;
     }
     
     const requestData = {
@@ -778,6 +788,38 @@ const PresetWizard = ({ selectedVideo, onProcess }) => {
               )}
             </div>
           )}
+        </div>
+
+        {/* Processing Options */}
+        <div className="mt-6 border-t pt-4">
+          <h3 className="text-lg font-semibold mb-4">Processing Options</h3>
+          <div className="space-y-3">
+            <label className="flex items-center space-x-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={enableStabilization}
+                onChange={(e) => setEnableStabilization(e.target.checked)}
+                className="w-5 h-5 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+              />
+              <span className="text-sm font-medium">Enable Video Stabilization</span>
+            </label>
+            <p className="text-xs text-gray-500 ml-8">
+              Reduces camera shake. Disable if video is already stable or results look distorted.
+            </p>
+            
+            <label className="flex items-center space-x-3 cursor-pointer mt-4">
+              <input
+                type="checkbox"
+                checked={enableProcessing}
+                onChange={(e) => setEnableProcessing(e.target.checked)}
+                className="w-5 h-5 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+              />
+              <span className="text-sm font-medium">Enable Neural Network Processing</span>
+            </label>
+            <p className="text-xs text-gray-500 ml-8">
+              Applies motion amplification using the neural network. Disable to skip processing step.
+            </p>
+          </div>
         </div>
 
         {/* Preview Section */}
