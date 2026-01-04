@@ -771,10 +771,15 @@ const PresetWizard = ({ selectedVideo, onProcess }) => {
         <div className="flex items-center justify-between">
           {[1, 2, 3, 4].map(step => (
             <div key={step} className="flex items-center flex-1">
-              <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
-                currentStep >= step ? 'bg-darker text-white' : 'bg-gray-300 text-gray-600'
-              }`}>
-                {step}
+              <div className="flex flex-col items-center">
+                <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
+                  currentStep >= step ? 'bg-darker text-white' : 'bg-gray-300 text-gray-600'
+                }`}>
+                  {step}
+                </div>
+                <span className="mt-2 text-xs text-gray-600">
+                  {step === 1 ? 'Load' : step === 2 ? 'Region' : step === 3 ? 'Goal' : 'Export'}
+                </span>
               </div>
               {step < 4 && (
                 <div className={`flex-1 h-1 mx-2 ${
@@ -783,12 +788,6 @@ const PresetWizard = ({ selectedVideo, onProcess }) => {
               )}
             </div>
           ))}
-        </div>
-        <div className="flex justify-between mt-2 text-xs text-gray-600">
-          <span>Load</span>
-          <span>Region</span>
-          <span>Goal</span>
-          <span>Export</span>
         </div>
       </div>
 
