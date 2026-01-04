@@ -859,6 +859,13 @@ async def serve_spa(full_path: str):
     if full_path.startswith("static/"):
         raise HTTPException(status_code=404, detail="Static file not found")
     static_dir = Path("frontend/build")
+    
+    # Check if the requested path is an actual file in the build directory
+    file_path = static_dir / full_path
+    if file_path.exists() and file_path.is_file():
+        return FileResponse(str(file_path))
+    
+    # Otherwise serve index.html for SPA routing
     index_path = static_dir / "index.html"
     if index_path.exists():
         return FileResponse(str(index_path))

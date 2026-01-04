@@ -26,7 +26,7 @@ const Navbar = () => {
     <nav className="bg-darker p-4">
       <div className="container mx-auto flex justify-between items-center">
         <Link to="/" className="flex items-center space-x-3 hover:opacity-80 transition-opacity">
-          <img src="/logo-navbar.svg" alt="Motion Amplifier Logo" className="h-10 w-auto" />
+          <img src={`${process.env.PUBLIC_URL}/logo-navbar.svg`} alt="Motion Amplifier Logo" className="h-10 w-auto" onError={(e) => { e.target.onerror = null; e.target.src = '/logo-navbar.svg'; }} />
         </Link>
         <div className="lg:hidden">
           {/* Mobile Menu Button */}
