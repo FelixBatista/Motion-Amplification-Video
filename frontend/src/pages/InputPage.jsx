@@ -130,165 +130,88 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import Navbar from '../components/Navbar';
-import ImportData from '../components/ImportData';
-import VideoAmp from '../components/VideoAmp';
-import FreqSpect from '../components/FreqSpect';
-import UserInput from '../components/UserInput';
+import PresetWizard from '../components/PresetWizard';
 
 const InputPage = () => {
-  const [dialogVisible, setDialogVisible] = useState(true);
-  const [loading,setLoading] = useState(false)
+  const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
 
-  const handleCloseDialog = () => {
-    setDialogVisible(false);
-    navigate('/');
-  };
-
   const selectedVideo = location.state?.selectedVideo;
 
-  // Define state for input parameters with sensible defaults
-  const [inputParameters, setInputParameters] = useState({
-    phase: 'run',
-    config_file: 'o3f_hmhm2_bg_qnoise_mix4_nl_n_t_ds3.conf',
-    config_spec: 'configs/configspec.conf',
-    vid_dir: 'data/vids',
-    frame_ext: 'png',
-    out_dir: 'data/output',
-    amplification_factor: 30,
-    velocity_mag: false,
-    fl: 0.04,
-    fh: 0.4,
-    fs: 30.0,
-    n_filter_tap: 2,
-    filter_type: 'differenceOfIIR',
-    Temporal: true,
-  });
-
-  // Auto-populate fields when video is selected
-  useEffect(() => {
-    if (selectedVideo) {
-      // Extract video name for auto-population
-      const videoName = selectedVideo.split('/').pop()?.replace('.mp4', '') || '';
-      setInputParameters(prev => ({
-        ...prev,
-        vid_dir: `data/vids/${videoName}`,
-        out_dir: `data/output/${videoName}_o3f_hmhm2_bg_qnoise_mix4_nl_n_t_ds3`,
-        fs: 30.0, // Default frame rate
-      }));
-    }
-  }, [selectedVideo]);
-
-  // Input changes are handled by UserInput component via handleFormSubmit
-
-  // Handle the JSON creation and logging
-  const handleJSONCreation = () => {
+  const handleProcess = async (requestData) => {
     if (!selectedVideo) {
       alert('Please select a video first');
       return;
     }
 
     const API_BASE = process.env.REACT_APP_API_URL || '';
-    const requestData = {
-      videoPath: selectedVideo,
-      inputParameters: inputParameters,
-    };
-
     console.log('Sending request:', requestData);
     setLoading(true);
 
-    fetch(`${API_BASE}/api/process`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(requestData),
-    })
-      .then(async (response) => {
-        const data = await response.json();
-        console.log('Response from server:', data);
-        
-        if (!response.ok) {
-          const errorMsg = data.detail || data.error || `Server error: ${response.status}`;
-          alert('Error: ' + errorMsg);
-          setLoading(false);
-          return;
-        }
-        
-        if (data.error) {
-          alert('Error: ' + data.error);
-          setLoading(false);
-          return;
-        }
-        
-        navigate('/output', {
-          state: {
-            data: data
-          }
-        });
-        setLoading(false);
-      })
-      .catch((error) => {
-        console.error('Error:', error);
-        alert('Network error: ' + error.message);
-        setLoading(false);
+    try {
+      const response = await fetch(`${API_BASE}/api/process`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(requestData),
       });
-  };
 
-  const handleFormSubmit = (formData) => {
-    // You can access the form data here
-    setInputParameters(formData);
-  };
-
-  useEffect(() => {
-    if (selectedVideo) {
-      console.log('selectedVideo', selectedVideo);
+      const data = await response.json();
+      console.log('Response from server:', data);
+      
+      if (!response.ok) {
+        const errorMsg = data.detail || data.error || `Server error: ${response.status}`;
+        alert('Error: ' + errorMsg);
+        setLoading(false);
+        return;
+      }
+      
+      if (data.error) {
+        alert('Error: ' + data.error);
+        setLoading(false);
+        return;
+      }
+      
+      navigate('/output', {
+        state: {
+          data: data
+        }
+      });
+    } catch (error) {
+      console.error('Error:', error);
+      alert('Network error: ' + error.message);
+    } finally {
+      setLoading(false);
     }
-  }, [selectedVideo]);
+  };
 
   return (
     <div className="h-screen flex flex-col overflow-hidden">
-    {!loading ? (
-      <div className="flex flex-col h-full min-h-0">
-      <Navbar/>
-        <div className={`bg-default flex-1 flex flex-col min-h-0 ${dialogVisible ? '' : 'hidden'}`}>
-          <div className="flex-shrink-0 mb-2 p-2">
-        {/* Close Button */}
-        <button
-          onClick={handleCloseDialog}
-              className="text-red-700 bg-light hover:text-red-900 px-3 py-1 rounded-full shadow-lg"
-        >
-              ✕ Close
-        </button>
-      </div>
-          <div className="flex-1 overflow-y-auto px-4 pb-4 min-h-0">
-            <div className="max-w-4xl mx-auto space-y-4 py-2">
-              <ImportData selectedVideo={selectedVideo} />
-        <VideoAmp />
-        <FreqSpect />
-              <UserInput onSubmit={handleFormSubmit} className='bg-light'/>
+      {!loading ? (
+        <div className="flex flex-col h-full min-h-0">
+          <Navbar />
+          <div className="flex-1 overflow-y-auto bg-default">
+            <div className="py-4">
+              <PresetWizard 
+                selectedVideo={selectedVideo} 
+                onProcess={handleProcess}
+              />
             </div>
-      </div>
-      {/* Button to create and log JSON */}
-          <div className="flex-shrink-0 p-4 flex justify-center items-center border-t bg-default">
-  <button
-    onClick={handleJSONCreation}
-              className="bg-darker text-white px-8 py-3 rounded-md hover:bg-dark text-lg font-semibold"
-  >
-              Process Video (MAV)
-  </button>
-</div>
-</div>
-      </div>
-    ) : (
-      <div className='flex items-center justify-center h-screen'>
-        <svg className="animate-spin -ml-1 mr-3 h-1/3 w-1/3 text-black" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-        </svg>
-      </div>
-    )}
+          </div>
+        </div>
+      ) : (
+        <div className='flex items-center justify-center h-screen'>
+          <div className="text-center">
+            <svg className="animate-spin -ml-1 mr-3 h-16 w-16 text-black mx-auto" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            <p className="mt-4 text-lg">Processing video...</p>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

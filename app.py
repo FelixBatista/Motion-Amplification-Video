@@ -12,8 +12,13 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from typing import Optional, Dict, Any, Union
+from fastapi import Request
+import json
 import uvicorn
 import subprocess
+import preset_loader
+import auto_tuning
 
 # Create necessary directories
 os.makedirs("data/uploads", exist_ok=True)
@@ -53,6 +58,12 @@ class ProcessRequest(BaseModel):
     inputParameters: InputParameters
     
     model_config = {"extra": "allow"}  # Allow extra fields for flexibility
+
+# New preset-based models
+class PresetProcessRequest(BaseModel):
+    videoPath: str
+    preset: str = "general_auto"  # Preset name
+    overrides: Optional[Dict[str, Any]] = None  # Optional parameter overrides
 
 # Serve static files (frontend build) if it exists
 static_dir = Path("frontend/build")
@@ -168,6 +179,71 @@ async def get_output_video(folder_name: str, filename: str):
         raise HTTPException(status_code=404, detail="Output video not found")
     return FileResponse(str(video_path), media_type="video/mp4")
 
+@app.get("/api/presets")
+async def list_presets():
+    """List all available presets with descriptions"""
+    presets = preset_loader.list_available_presets()
+    preset_descriptions = {
+        "general_auto": "General motion amplification - automatically detects best settings",
+        "vibration_auto": "Vibration analysis for machinery and automotive (NVH)",
+        "heartbeat_auto": "Heartbeat and breathing visualization",
+        "structural_auto": "Structural motion analysis (buildings, bridges)",
+        "handheld_auto": "Handheld/shaky camera with stabilization"
+    }
+    
+    result = []
+    for preset in presets:
+        result.append({
+            "name": preset,
+            "description": preset_descriptions.get(preset, "Custom preset")
+        })
+    
+    return {"presets": result}
+
+class AnalyzeRequest(BaseModel):
+    videoPath: str
+
+@app.post("/api/analyze-video")
+async def analyze_video(request: AnalyzeRequest):
+    """Analyze video and return auto-tuning results (FPS, ROI, frequencies)"""
+    try:
+        video_path = Path(request.videoPath.replace("/api/video/", "data/uploads/"))
+        if not video_path.exists():
+            raise HTTPException(status_code=404, detail="Video not found")
+        
+        # Run auto-tuning
+        print(f"Analyzing video: {video_path}")
+        
+        # Detect FPS
+        fps = auto_tuning.detect_video_fps(str(video_path))
+        print(f"Detected FPS: {fps}")
+        
+        # Detect ROI
+        roi = auto_tuning.detect_roi(str(video_path))
+        print(f"Detected ROI: {roi}")
+        
+        # Detect frequencies
+        frequencies = auto_tuning.detect_dominant_frequencies(str(video_path), roi, fps)
+        print(f"Detected frequencies: {frequencies}")
+        
+        # Suggest mode
+        suggested_mode = auto_tuning.auto_choose_mode(frequencies)
+        
+        # Suggest amplification
+        suggested_amplification = auto_tuning.find_safe_amplification(str(video_path), roi, fs=fps)
+        
+        return {
+            "fps": fps,
+            "roi": roi,
+            "frequencies": frequencies,
+            "suggested_mode": suggested_mode,
+            "suggested_amplification": suggested_amplification
+        }
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Analysis error: {str(e)}")
+
 @app.post("/api/upload")
 async def upload_video(file: UploadFile = File(...)):
     """Upload a video file"""
@@ -191,10 +267,30 @@ async def upload_video(file: UploadFile = File(...)):
     }
 
 @app.post("/api/process")
-async def process_video(request: ProcessRequest):
-    """Process a video with motion amplification"""
+async def process_video(http_request: Request):
+    """Process a video with motion amplification
+    
+    Supports both old format (ProcessRequest) and new preset format (PresetProcessRequest).
+    Detects format automatically based on request body.
+    """
     try:
-        video_path = Path(request.videoPath.replace("/api/video/", "data/uploads/"))
+        # Parse request body
+        body = await http_request.json()
+        
+        # Determine which request format to use
+        use_preset = "preset" in body
+        
+        if use_preset:
+            # New preset-based format
+            preset_request = PresetProcessRequest(**body)
+            video_path = Path(preset_request.videoPath.replace("/api/video/", "data/uploads/"))
+            preset_name = preset_request.preset
+            overrides = preset_request.overrides or {}
+        else:
+            # Legacy format (backward compatibility)
+            request = ProcessRequest(**body)
+            video_path = Path(request.videoPath.replace("/api/video/", "data/uploads/"))
+        
         if not video_path.exists():
             raise HTTPException(status_code=404, detail="Video not found")
         
@@ -216,37 +312,92 @@ async def process_video(request: ProcessRequest):
             raise HTTPException(status_code=500, detail=error_msg)
         
         # Build processing command
-        params = request.inputParameters
-        # Ensure config_file has correct path
-        config_file = params.config_file
-        if not config_file.startswith("configs/") and not "/" in config_file:
-            config_file = f"configs/{config_file}"
-        
-        # Use Python 3.10 for main.py (TensorFlow compatibility)
-        python_cmd = "py -3.10"
-        
-        # Quote paths that might contain spaces
-        vid_dir_quoted = f'"{vid_dir}"'
-        out_dir_base = f"data/output/{name}_o3f_hmhm2_bg_qnoise_mix4_nl_n_t_ds3"
-        out_dir_quoted = f'"{out_dir_base}"'
-        config_file_quoted = f'"{config_file}"'
-        
-        if params.Temporal:
-            command = (
-                f'{python_cmd} main.py --config_file={config_file_quoted} --phase=run_temporal '
-                f'--vid_dir={vid_dir_quoted} --out_dir={out_dir_quoted} '
-                f'--amplification_factor={params.amplification_factor} '
-                f'--fl={params.fl} --fh={params.fh} --fs={params.fs} '
-                f'--n_filter_tap={params.n_filter_tap} --filter_type={params.filter_type}'
-            )
-            folder = f"{name}_o3f_hmhm2_bg_qnoise_mix4_nl_n_t_ds3_fl{params.fl}_fh{params.fh}_fs{params.fs}_n{params.n_filter_tap}_{params.filter_type}"
+        if use_preset:
+            # New preset-based flow
+            print(f"Using preset: {preset_name}")
+            
+            # Load preset
+            preset = preset_loader.load_preset(preset_name)
+            
+            # Run auto-tuning
+            print("Running auto-tuning analysis...")
+            fps = auto_tuning.detect_video_fps(str(video_path))
+            roi = auto_tuning.detect_roi(str(video_path))
+            frequencies = auto_tuning.detect_dominant_frequencies(str(video_path), roi, fps)
+            suggested_amplification = auto_tuning.find_safe_amplification(str(video_path), roi, fs=fps)
+            
+            video_metadata = {"fps": fps}
+            auto_tuning_results = {
+                "roi": roi,
+                "frequencies": frequencies,
+                "suggested_amplification": suggested_amplification
+            }
+            
+            # Resolve auto values
+            resolved_preset = preset_loader.resolve_auto_values(preset, video_metadata, auto_tuning_results)
+            
+            # Convert to CLI args
+            cli_args = preset_loader.preset_to_cli_args(resolved_preset, 
+                                                       model_config_path="configs/models/magnet_default.conf",
+                                                       video_name=name,
+                                                       overrides=overrides)
+            
+            # Build command from CLI args
+            config_file = cli_args['config_file']
+            config_file_quoted = f'"{config_file}"'
+            vid_dir_quoted = f'"{vid_dir}"'
+            out_dir_quoted = f'"{cli_args["out_dir"]}"'
+            python_cmd = "py -3.10"
+            
+            if cli_args['phase'] == 'run_temporal':
+                command = (
+                    f'{python_cmd} main.py --config_file={config_file_quoted} --phase=run_temporal '
+                    f'--vid_dir={vid_dir_quoted} --out_dir={out_dir_quoted} '
+                    f'--amplification_factor={cli_args["amplification_factor"]} '
+                    f'--fl={cli_args["fl"]} --fh={cli_args["fh"]} --fs={fps} '
+                    f'--n_filter_tap={cli_args["n_filter_tap"]} --filter_type={cli_args["filter_type"]}'
+                )
+                folder = f"{name}_o3f_hmhm2_bg_qnoise_mix4_nl_n_t_ds3_fl{cli_args['fl']}_fh{cli_args['fh']}_fs{fps}_n{cli_args['n_filter_tap']}_{cli_args['filter_type']}"
+            else:
+                command = (
+                    f'{python_cmd} main.py --config_file={config_file_quoted} --phase=run '
+                    f'--vid_dir={vid_dir_quoted} --out_dir={out_dir_quoted} '
+                    f'--amplification_factor={cli_args["amplification_factor"]}'
+                )
+                folder = f"{name}_o3f_hmhm2_bg_qnoise_mix4_nl_n_t_ds3"
         else:
-            command = (
-                f'{python_cmd} main.py --config_file={config_file_quoted} --phase=run '
-                f'--vid_dir={vid_dir_quoted} --out_dir={out_dir_quoted} '
-                f'--amplification_factor={params.amplification_factor}'
-            )
-            folder = f"{name}_o3f_hmhm2_bg_qnoise_mix4_nl_n_t_ds3"
+            # Legacy format
+            params = request.inputParameters
+            # Ensure config_file has correct path
+            config_file = params.config_file
+            if not config_file.startswith("configs/") and not "/" in config_file:
+                config_file = f"configs/{config_file}"
+            
+            # Use Python 3.10 for main.py (TensorFlow compatibility)
+            python_cmd = "py -3.10"
+            
+            # Quote paths that might contain spaces
+            vid_dir_quoted = f'"{vid_dir}"'
+            out_dir_base = f"data/output/{name}_o3f_hmhm2_bg_qnoise_mix4_nl_n_t_ds3"
+            out_dir_quoted = f'"{out_dir_base}"'
+            config_file_quoted = f'"{config_file}"'
+            
+            if params.Temporal:
+                command = (
+                    f'{python_cmd} main.py --config_file={config_file_quoted} --phase=run_temporal '
+                    f'--vid_dir={vid_dir_quoted} --out_dir={out_dir_quoted} '
+                    f'--amplification_factor={params.amplification_factor} '
+                    f'--fl={params.fl} --fh={params.fh} --fs={params.fs} '
+                    f'--n_filter_tap={params.n_filter_tap} --filter_type={params.filter_type}'
+                )
+                folder = f"{name}_o3f_hmhm2_bg_qnoise_mix4_nl_n_t_ds3_fl{params.fl}_fh{params.fh}_fs{params.fs}_n{params.n_filter_tap}_{params.filter_type}"
+            else:
+                command = (
+                    f'{python_cmd} main.py --config_file={config_file_quoted} --phase=run '
+                    f'--vid_dir={vid_dir_quoted} --out_dir={out_dir_quoted} '
+                    f'--amplification_factor={params.amplification_factor}'
+                )
+                folder = f"{name}_o3f_hmhm2_bg_qnoise_mix4_nl_n_t_ds3"
         
         # Run processing
         print(f"Processing video (this may take a while)...")
@@ -296,11 +447,19 @@ async def process_video(request: ProcessRequest):
         else:
             print(f"Video re-encoded successfully: {final_output}")
         
-        return {
-            "message": "Video processed successfully",
-            "outputPath": f"/api/video/{final_output.name}",
-            "inputParameters": params.dict()
-        }
+        if use_preset:
+            return {
+                "message": "Video processed successfully",
+                "outputPath": f"/api/video/{final_output.name}",
+                "preset": preset_name,
+                "resolvedParameters": cli_args
+            }
+        else:
+            return {
+                "message": "Video processed successfully",
+                "outputPath": f"/api/video/{final_output.name}",
+                "inputParameters": request.inputParameters.dict()
+            }
         
     except HTTPException:
         raise
