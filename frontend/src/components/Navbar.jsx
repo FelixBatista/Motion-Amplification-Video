@@ -25,8 +25,8 @@ const Navbar = () => {
   return (
     <nav className="bg-darker p-4">
       <div className="container mx-auto flex justify-between items-center">
-        <Link to="/" className="text-white font-bold text-lg">
-        Logo
+        <Link to="/" className="flex items-center space-x-3 hover:opacity-80 transition-opacity">
+          <img src="/logo-navbar.svg" alt="Motion Amplifier Logo" className="h-10 w-auto" />
         </Link>
         <div className="lg:hidden">
           {/* Mobile Menu Button */}
@@ -38,19 +38,19 @@ const Navbar = () => {
           </button>
         </div>
         <div className="hidden lg:block space-x-4">
-          <Link to="/" className="text-white font-sans hover:text-red-500">
+          <Link to="/" className="text-white font-sans hover:text-teal-300 transition-colors">
             Home
             <span className="text-white font-sans text-lg ml-4">|</span>
           </Link>
-          <Link to="/upload" className="text-white font-sans hover:text-red-500">
+          <Link to="/upload" className="text-white font-sans hover:text-teal-300 transition-colors">
             Upload
             <span className="text-white text-lg font-sans ml-4">|</span>
           </Link>
-          <Link to="/input" className="text-white font-sans hover:text-red-500">
+          <Link to="/input" className="text-white font-sans hover:text-teal-300 transition-colors">
             Input
             <span className="text-white text-lg font-sans ml-4">|</span>
           </Link>
-          <Link to="/output" className="text-white font-sans hover:text-red-500">
+          <Link to="/output" className="text-white font-sans hover:text-teal-300 transition-colors">
             Output
             <span className="text-white text-lg font-sans ml-4">|</span>
           </Link>
@@ -60,16 +60,16 @@ const Navbar = () => {
       {/* Mobile Menu */}
       {isMobileMenuOpen && (
         <div className="lg:hidden mt-4 space-y-2">
-          <Link to="/" className="block text-white hover:text-red-500">
+          <Link to="/" className="block text-white hover:text-teal-300 transition-colors">
             Home
           </Link>
-          <Link to="/upload" className="block text-white hover:text-red-500">
+          <Link to="/upload" className="block text-white hover:text-teal-300 transition-colors">
             Upload
           </Link>
-          <Link to="/input" className="block text-white hover:text-red-500">
+          <Link to="/input" className="block text-white hover:text-teal-300 transition-colors">
             Input
           </Link>
-          <Link to="/output" className="block text-white hover:text-red-500">
+          <Link to="/output" className="block text-white hover:text-teal-300 transition-colors">
             Output
           </Link>
         </div>

@@ -1,0 +1,47 @@
+<svg width="64" height="64" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background gradient -->
+  <defs>
+    <radialGradient id="logoGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" style="stop-color:#4FC3F7;stop-opacity:0.8" />
+      <stop offset="100%" style="stop-color:#0288D1;stop-opacity:0.3" />
+    </radialGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  
+  <!-- Background circle -->
+  <circle cx="100" cy="100" r="100" fill="#5FB3B3"/>
+  
+  <!-- Logo: Glowing ring -->
+  <circle cx="100" cy="100" r="45" fill="none" stroke="#4FC3F7" stroke-width="3" filter="url(#glow)" opacity="0.9"/>
+  
+  <!-- Logo: Dark blue circle -->
+  <circle cx="100" cy="100" r="35" fill="#1565C0"/>
+  
+  <!-- Equalizer bars (left side) -->
+  <g filter="url(#glow)">
+    <rect x="55" y="85" width="4" height="15" fill="#4FC3F7" rx="2"/>
+    <rect x="62" y="80" width="4" height="25" fill="#4FC3F7" rx="2"/>
+    <rect x="69" y="75" width="4" height="35" fill="#4FC3F7" rx="2"/>
+    <rect x="76" y="82" width="4" height="21" fill="#4FC3F7" rx="2"/>
+    <rect x="83" y="88" width="4" height="9" fill="#4FC3F7" rx="2"/>
+  </g>
+  
+  <!-- Small circle and line (left of equalizer) -->
+  <circle cx="48" cy="100" r="3" fill="#4FC3F7" filter="url(#glow)"/>
+  <line x1="52" y1="100" x2="55" y2="100" stroke="#4FC3F7" stroke-width="2" filter="url(#glow)"/>
+  
+  <!-- Play button (center) -->
+  <path d="M 95 90 L 95 110 L 110 100 Z" fill="white" opacity="0.95"/>
+  
+  <!-- Glowing particles -->
+  <circle cx="45" cy="85" r="1.5" fill="white" opacity="0.8"/>
+  <circle cx="50" cy="95" r="1" fill="white" opacity="0.7"/>
+  <circle cx="40" cy="105" r="1.5" fill="white" opacity="0.8"/>
+</svg>
+
