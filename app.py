@@ -65,6 +65,11 @@ class PresetProcessRequest(BaseModel):
     preset: str = "general_auto"  # Preset name
     overrides: Optional[Dict[str, Any]] = None  # Optional parameter overrides
 
+class PreviewRequest(BaseModel):
+    videoPath: str
+    preset: str = "general_auto"
+    overrides: Optional[Dict[str, Any]] = None
+
 # Serve static files (frontend build) if it exists
 static_dir = Path("frontend/build")
 if static_dir.exists():
@@ -200,8 +205,169 @@ async def list_presets():
     
     return {"presets": result}
 
+class SavePresetRequest(BaseModel):
+    name: str
+    preset: Dict[str, Any]  # Preset configuration
+
+@app.post("/api/presets/save")
+async def save_custom_preset(request: SavePresetRequest):
+    """Save a custom preset configuration"""
+    try:
+        # Validate preset name
+        if not request.name or not request.name.replace('_', '').replace('-', '').isalnum():
+            raise HTTPException(status_code=400, detail="Invalid preset name. Use alphanumeric characters, underscores, or hyphens.")
+        
+        # Ensure presets directory exists
+        presets_dir = Path("configs/presets")
+        presets_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Create preset file
+        preset_path = presets_dir / f"{request.name}.conf"
+        
+        # Convert dict to ConfigObj format
+        from configobj import ConfigObj
+        preset_obj = ConfigObj()
+        
+        # Set run section
+        if 'run' in request.preset:
+            preset_obj['run'] = {}
+            for key, value in request.preset['run'].items():
+                preset_obj['run'][key] = str(value)
+        
+        # Set temporal section
+        if 'temporal' in request.preset:
+            preset_obj['temporal'] = {}
+            for key, value in request.preset['temporal'].items():
+                preset_obj['temporal'][key] = str(value)
+        
+        # Write to file
+        preset_obj.filename = str(preset_path)
+        preset_obj.write()
+        
+        return {
+            "message": "Preset saved successfully",
+            "name": request.name,
+            "path": f"configs/presets/{request.name}.conf"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to save preset: {str(e)}")
+
 class AnalyzeRequest(BaseModel):
     videoPath: str
+
+@app.post("/api/preview")
+async def generate_preview(request: PreviewRequest):
+    """Generate a 2-3 second preview of processed video"""
+    try:
+        video_path = Path(request.videoPath.replace("/api/video/", "data/uploads/"))
+        if not video_path.exists():
+            raise HTTPException(status_code=404, detail="Video not found")
+        
+        # Create preview directory
+        preview_dir = Path("data/previews")
+        preview_dir.mkdir(parents=True, exist_ok=True)
+        
+        name = video_path.stem
+        preview_output = preview_dir / f"{name}_preview.mp4"
+        
+        # Extract first 3 seconds of video
+        print(f"Extracting preview segment from: {video_path}")
+        ffmpeg_cmd = f'ffmpeg -i "{video_path}" -t 3 -c copy "{preview_output}" -y'
+        result = subprocess.run(ffmpeg_cmd, shell=True, capture_output=True, text=True)
+        if result.returncode != 0:
+            raise HTTPException(status_code=500, detail=f"Failed to extract preview: {result.stderr}")
+        
+        # Process preview with same settings as full video
+        preset = preset_loader.load_preset(request.preset)
+        fps = auto_tuning.detect_video_fps(str(video_path))
+        roi = auto_tuning.detect_roi(str(video_path))
+        frequencies = auto_tuning.detect_dominant_frequencies(str(video_path), roi, fps)
+        suggested_amplification = auto_tuning.find_safe_amplification(str(video_path), roi, fs=fps)
+        
+        video_metadata = {"fps": fps}
+        auto_tuning_results = {
+            "roi": roi,
+            "frequencies": frequencies,
+            "suggested_amplification": suggested_amplification
+        }
+        
+        resolved_preset = preset_loader.resolve_auto_values(preset, video_metadata, auto_tuning_results)
+        cli_args = preset_loader.preset_to_cli_args(resolved_preset,
+                                                   model_config_path="configs/models/magnet_default.conf",
+                                                   video_name=f"{name}_preview",
+                                                   overrides=request.overrides or {})
+        
+        # Create preview frames directory
+        preview_frames_dir = Path(f"data/vids/{name}_preview")
+        preview_frames_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Convert preview to frames
+        ffmpeg_cmd = f'ffmpeg -i "{preview_output}" "{preview_frames_dir}/%06d.png"'
+        result = subprocess.run(ffmpeg_cmd, shell=True, capture_output=True, text=True)
+        if result.returncode != 0:
+            raise HTTPException(status_code=500, detail=f"Failed to convert preview to frames: {result.stderr}")
+        
+        # Process preview frames
+        config_file_quoted = f'"{cli_args["config_file"]}"'
+        vid_dir_quoted = f'"{preview_frames_dir}"'
+        out_dir_quoted = f'"data/output/{name}_preview_o3f_hmhm2_bg_qnoise_mix4_nl_n_t_ds3"'
+        python_cmd = "py -3.10"
+        
+        if cli_args['phase'] == 'run_temporal':
+            command = (
+                f'{python_cmd} main.py --config_file={config_file_quoted} --phase=run_temporal '
+                f'--vid_dir={vid_dir_quoted} --out_dir={out_dir_quoted} '
+                f'--amplification_factor={cli_args["amplification_factor"]} '
+                f'--fl={cli_args["fl"]} --fh={cli_args["fh"]} --fs={fps} '
+                f'--n_filter_tap={cli_args["n_filter_tap"]} --filter_type={cli_args["filter_type"]}'
+            )
+        else:
+            command = (
+                f'{python_cmd} main.py --config_file={config_file_quoted} --phase=run '
+                f'--vid_dir={vid_dir_quoted} --out_dir={out_dir_quoted} '
+                f'--amplification_factor={cli_args["amplification_factor"]}'
+            )
+        
+        print(f"Processing preview: {command}")
+        result = subprocess.run(command, shell=True, capture_output=True, text=True)
+        if result.returncode != 0:
+            raise HTTPException(status_code=500, detail=f"Preview processing failed: {result.stderr}")
+        
+        # Find output video
+        output_folder = f"{name}_preview_o3f_hmhm2_bg_qnoise_mix4_nl_n_t_ds3"
+        if cli_args['phase'] == 'run_temporal':
+            output_folder += f"_fl{cli_args['fl']}_fh{cli_args['fh']}_fs{fps}_n{cli_args['n_filter_tap']}_{cli_args['filter_type']}"
+        
+        output_file = Path(f"data/output/{output_folder}/{output_folder}_259002.mp4")
+        if not output_file.exists():
+            raise HTTPException(status_code=500, detail="Preview processing completed but output not found")
+        
+        # Copy to previews directory for serving
+        final_preview = preview_dir / f"{name}_processed_preview.mp4"
+        shutil.copy2(output_file, final_preview)
+        
+        return {
+            "previewUrl": f"/api/preview/{final_preview.name}",
+            "message": "Preview generated successfully"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Preview generation error: {str(e)}")
+
+@app.get("/api/preview/{filename}")
+async def get_preview(filename: str):
+    """Serve a preview video file"""
+    preview_path = Path("data/previews") / filename
+    if not preview_path.exists():
+        raise HTTPException(status_code=404, detail="Preview not found")
+    return FileResponse(str(preview_path), media_type="video/mp4")
 
 @app.post("/api/analyze-video")
 async def analyze_video(request: AnalyzeRequest):
@@ -299,11 +465,30 @@ async def process_video(http_request: Request):
         vid_dir = Path(f"data/vids/{name}")
         vid_dir.mkdir(parents=True, exist_ok=True)
         
+        # Check if stabilization is needed (for preset-based processing)
+        needs_stabilization = False
+        if use_preset:
+            preset_obj = preset_loader.load_preset(preset_name)
+            stabilization_setting = preset_obj.get('run', {}).get('stabilization', 'auto')
+            if stabilization_setting == 'on' or (stabilization_setting == 'auto' and preset_name != 'heartbeat_auto'):
+                needs_stabilization = True
+        
+        # Apply stabilization if needed
+        processing_video_path = video_path
+        if needs_stabilization:
+            print("Applying video stabilization...")
+            stabilized_path = Path("data/uploads") / f"{name}_stabilized.mp4"
+            if auto_tuning.stabilize_video(str(video_path), str(stabilized_path)):
+                processing_video_path = stabilized_path
+                print("Video stabilized successfully")
+            else:
+                print("Warning: Stabilization failed, using original video")
+        
         # Convert video to frames using ffmpeg
         print(f"Converting video to frames...")
-        print(f"Video path: {video_path}")
+        print(f"Video path: {processing_video_path}")
         print(f"Output directory: {vid_dir}")
-        ffmpeg_cmd = f'ffmpeg -i "{video_path}" "{vid_dir}/%06d.png"'
+        ffmpeg_cmd = f'ffmpeg -i "{processing_video_path}" "{vid_dir}/%06d.png"'
         print(f"FFmpeg command: {ffmpeg_cmd}")
         result = subprocess.run(ffmpeg_cmd, shell=True, capture_output=True, text=True)
         if result.returncode != 0:
@@ -319,12 +504,12 @@ async def process_video(http_request: Request):
             # Load preset
             preset = preset_loader.load_preset(preset_name)
             
-            # Run auto-tuning
+            # Run auto-tuning (use processing video path which may be stabilized)
             print("Running auto-tuning analysis...")
-            fps = auto_tuning.detect_video_fps(str(video_path))
-            roi = auto_tuning.detect_roi(str(video_path))
-            frequencies = auto_tuning.detect_dominant_frequencies(str(video_path), roi, fps)
-            suggested_amplification = auto_tuning.find_safe_amplification(str(video_path), roi, fs=fps)
+            fps = auto_tuning.detect_video_fps(str(processing_video_path))
+            roi = auto_tuning.detect_roi(str(processing_video_path))
+            frequencies = auto_tuning.detect_dominant_frequencies(str(processing_video_path), roi, fps)
+            suggested_amplification = auto_tuning.find_safe_amplification(str(processing_video_path), roi, fs=fps)
             
             video_metadata = {"fps": fps}
             auto_tuning_results = {

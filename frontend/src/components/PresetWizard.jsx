@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import DisplayVideo from './DisplayVideo';
 import AdvancedSettings from './AdvancedSettings';
+import ROISelector from './ROISelector';
 
 const API_BASE = process.env.REACT_APP_API_URL || '';
 
@@ -20,6 +21,12 @@ const PresetWizard = ({ selectedVideo, onProcess }) => {
   const [analysisResults, setAnalysisResults] = useState(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [videoMetadata, setVideoMetadata] = useState(null);
+  const [previewUrl, setPreviewUrl] = useState(null);
+  const [generatingPreview, setGeneratingPreview] = useState(false);
+  const [savingPreset, setSavingPreset] = useState(false);
+  const [presetName, setPresetName] = useState('');
+  const [showSavePreset, setShowSavePreset] = useState(false);
+  const videoRef = useRef(null);
 
   // Load presets on mount
   useEffect(() => {
@@ -88,6 +95,117 @@ const PresetWizard = ({ selectedVideo, onProcess }) => {
     }
   };
 
+  const handleSavePreset = async () => {
+    if (!presetName.trim()) {
+      alert('Please enter a preset name');
+      return;
+    }
+
+    setSavingPreset(true);
+    try {
+      // Build preset configuration from current settings
+      const presetConfig = {
+        run: {
+          mode: preset === 'advanced' ? (temporalMode === 'on' ? 'temporal' : 'standard') : 'auto',
+          roi: roi === 'auto' ? 'auto' : 'manual',
+          strength: strength === 'auto' ? 'auto' : strengthValue.toString(),
+          stabilization: 'auto',
+          output: 'auto'
+        },
+        temporal: {
+          enabled: temporalMode === 'auto' ? 'auto' : (temporalMode === 'on' ? 'on' : 'off'),
+          band: manualBand ? `${fl},${fh}` : 'auto',
+          filter: 'differenceOfIIR'
+        }
+      };
+
+      const response = await fetch(`${API_BASE}/api/presets/save`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: presetName.trim(),
+          preset: presetConfig
+        })
+      });
+
+      if (response.ok) {
+        alert(`Preset "${presetName}" saved successfully!`);
+        setShowSavePreset(false);
+        setPresetName('');
+        // Optionally reload presets list
+      } else {
+        const error = await response.json();
+        alert('Failed to save preset: ' + (error.detail || error.error || 'Unknown error'));
+      }
+    } catch (error) {
+      console.error('Save preset error:', error);
+      alert('Failed to save preset: ' + error.message);
+    } finally {
+      setSavingPreset(false);
+    }
+  };
+
+  const handleROIChange = (newROI) => {
+    setRoiCoords(newROI);
+    if (newROI) {
+      setRoi('manual');
+    }
+  };
+
+  const handleGeneratePreview = async () => {
+    if (!selectedVideo) {
+      alert('Please select a video first');
+      return;
+    }
+
+    setGeneratingPreview(true);
+    try {
+      const overrides = {};
+      
+      // Map strength
+      if (strength !== 'auto') {
+        overrides.strength = strengthValue;
+      } else {
+        overrides.strength = analysisResults?.suggested_amplification ? 
+          Math.min(100, Math.max(1, analysisResults.suggested_amplification * 2)) : 30;
+      }
+      
+      // Map ROI
+      if (roi !== 'auto' && roiCoords) {
+        overrides.roi = `${roiCoords.x},${roiCoords.y},${roiCoords.w},${roiCoords.h}`;
+      }
+      
+      // Map temporal band if manual
+      if (manualBand || temporalMode === 'on') {
+        overrides.fl = fl;
+        overrides.fh = fh;
+      }
+
+      const response = await fetch(`${API_BASE}/api/preview`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          videoPath: selectedVideo,
+          preset: preset,
+          overrides: Object.keys(overrides).length > 0 ? overrides : undefined
+        })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setPreviewUrl(data.previewUrl);
+      } else {
+        const error = await response.json();
+        alert('Preview generation failed: ' + (error.detail || error.error || 'Unknown error'));
+      }
+    } catch (error) {
+      console.error('Preview generation error:', error);
+      alert('Failed to generate preview: ' + error.message);
+    } finally {
+      setGeneratingPreview(false);
+    }
+  };
+
   const handleProcess = () => {
     if (!selectedVideo) {
       alert('Please select a video first');
@@ -130,7 +248,9 @@ const PresetWizard = ({ selectedVideo, onProcess }) => {
         {selectedVideo ? (
           <div>
             <p className="text-sm text-gray-600 mb-2">Video loaded: {selectedVideo.split('/').pop()}</p>
-            <DisplayVideo selectedVideo={selectedVideo} />
+            <div ref={videoRef}>
+              <DisplayVideo selectedVideo={selectedVideo} />
+            </div>
             {analyzing ? (
               <p className="mt-2 text-sm text-blue-600">Analyzing video...</p>
             ) : analysisResults ? (
@@ -175,13 +295,20 @@ const PresetWizard = ({ selectedVideo, onProcess }) => {
         </div>
         {selectedVideo && (
           <div className="relative">
-            <DisplayVideo selectedVideo={selectedVideo} />
-            {roi === 'manual' && (
+            <div className="relative w-full" style={{ maxHeight: '500px' }}>
+              <DisplayVideo selectedVideo={selectedVideo} />
+              {roi === 'manual' && (
+                <ROISelector
+                  videoElement={videoRef.current}
+                  onROIChange={handleROIChange}
+                  initialROI={roiCoords}
+                />
+              )}
+            </div>
+            {roi === 'manual' && roiCoords && (
               <div className="mt-2 text-sm text-gray-600">
-                <p>Click and drag on the video to select region (coming soon)</p>
-                {roiCoords && (
-                  <p>ROI: x={roiCoords.x}, y={roiCoords.y}, w={roiCoords.w}, h={roiCoords.h}</p>
-                )}
+                <p>ROI: x={Math.round(roiCoords.x)}, y={Math.round(roiCoords.y)}, 
+                   w={Math.round(roiCoords.w)}, h={Math.round(roiCoords.h)}</p>
               </div>
             )}
           </div>
@@ -229,7 +356,7 @@ const PresetWizard = ({ selectedVideo, onProcess }) => {
         ))}
       </div>
       {showAdvanced && (
-        <div className="mt-4">
+        <div className="mt-4 space-y-4">
           <AdvancedSettings
             temporalMode={temporalMode}
             setTemporalMode={setTemporalMode}
@@ -240,6 +367,45 @@ const PresetWizard = ({ selectedVideo, onProcess }) => {
             fh={fh}
             setFh={setFh}
           />
+          <div className="bg-gray-50 p-4 rounded-lg border border-gray-300">
+            <h3 className="font-bold mb-3">Save Custom Preset</h3>
+            {!showSavePreset ? (
+              <button
+                onClick={() => setShowSavePreset(true)}
+                className="bg-blue-500 text-white px-4 py-2 rounded-md hover:bg-blue-600 text-sm"
+              >
+                Save Current Settings as Preset
+              </button>
+            ) : (
+              <div className="space-y-2">
+                <input
+                  type="text"
+                  placeholder="Preset name (e.g., my_custom_preset)"
+                  value={presetName}
+                  onChange={(e) => setPresetName(e.target.value)}
+                  className="block w-full p-2 border border-gray-300 rounded-md text-sm"
+                />
+                <div className="flex gap-2">
+                  <button
+                    onClick={handleSavePreset}
+                    disabled={savingPreset || !presetName.trim()}
+                    className="bg-green-500 text-white px-4 py-2 rounded-md hover:bg-green-600 disabled:opacity-50 text-sm"
+                  >
+                    {savingPreset ? 'Saving...' : 'Save'}
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowSavePreset(false);
+                      setPresetName('');
+                    }}
+                    className="bg-gray-500 text-white px-4 py-2 rounded-md hover:bg-gray-600 text-sm"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       )}
       <div className="flex justify-between">
@@ -339,6 +505,30 @@ const PresetWizard = ({ selectedVideo, onProcess }) => {
                   </div>
                 </div>
               )}
+            </div>
+          )}
+        </div>
+
+        {/* Preview Section */}
+        <div className="mt-6 border-t pt-4">
+          <h3 className="text-lg font-semibold mb-2">Preview</h3>
+          <button
+            onClick={handleGeneratePreview}
+            disabled={generatingPreview}
+            className="bg-blue-500 text-white px-4 py-2 rounded-md hover:bg-blue-600 disabled:opacity-50"
+          >
+            {generatingPreview ? 'Generating Preview...' : 'Generate Preview (2-3 seconds)'}
+          </button>
+          {previewUrl && (
+            <div className="mt-4">
+              <p className="text-sm text-gray-600 mb-2">Preview:</p>
+              <video
+                src={previewUrl}
+                controls
+                className="w-full max-w-md rounded-lg"
+              >
+                Your browser does not support the video tag.
+              </video>
             </div>
           )}
         </div>
