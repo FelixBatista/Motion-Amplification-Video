@@ -1,16 +1,58 @@
 import React, { useState, useRef, useEffect } from 'react';
 
-const ROISelector = ({ videoElement, onROIChange, initialROI = null }) => {
+const API_BASE = process.env.REACT_APP_API_URL || '';
+
+const ROISelector = ({ videoElement, onROIChange, initialROI = null, videoPath = null }) => {
   const [isDrawing, setIsDrawing] = useState(false);
   const [startPos, setStartPos] = useState({ x: 0, y: 0 });
   const [currentROI, setCurrentROI] = useState(initialROI || null);
+  const [videoDimensions, setVideoDimensions] = useState(null);
   const containerRef = useRef(null);
+  const videoRef = useRef(null);
 
   useEffect(() => {
     if (initialROI) {
       setCurrentROI(initialROI);
     }
   }, [initialROI]);
+
+  // Get video dimensions when video loads
+  useEffect(() => {
+    if (videoElement && videoPath) {
+      const handleLoadedMetadata = async () => {
+        if (videoElement.videoWidth && videoElement.videoHeight) {
+          // Get actual video dimensions from backend
+          try {
+            const response = await fetch(`${API_BASE}/api/analyze-video`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ videoPath })
+            });
+            if (response.ok) {
+              const data = await response.json();
+              if (data.videoDimensions) {
+                setVideoDimensions(data.videoDimensions);
+              }
+            }
+          } catch (error) {
+            console.error('Failed to get video dimensions:', error);
+            // Fallback to video element dimensions
+            setVideoDimensions({
+              width: videoElement.videoWidth,
+              height: videoElement.videoHeight
+            });
+          }
+        }
+      };
+      
+      if (videoElement.readyState >= 1) {
+        handleLoadedMetadata();
+      } else {
+        videoElement.addEventListener('loadedmetadata', handleLoadedMetadata);
+        return () => videoElement.removeEventListener('loadedmetadata', handleLoadedMetadata);
+      }
+    }
+  }, [videoElement, videoPath]);
 
   const getRelativeCoordinates = (e) => {
     if (!containerRef.current) return { x: 0, y: 0 };
@@ -42,13 +84,51 @@ const ROISelector = ({ videoElement, onROIChange, initialROI = null }) => {
     setCurrentROI({ x, y, w, h });
   };
 
-  const handleMouseUp = (e) => {
+  const handleMouseUp = async (e) => {
     if (!isDrawing) return;
     setIsDrawing(false);
     if (currentROI && currentROI.w > 10 && currentROI.h > 10) {
-      // Convert to video coordinates (account for video aspect ratio)
-      if (onROIChange) {
-        onROIChange(currentROI);
+      // Convert to video coordinates if we have video dimensions
+      if (videoPath && videoDimensions && containerRef.current) {
+        try {
+          const displayDims = {
+            width: containerRef.current.offsetWidth,
+            height: containerRef.current.offsetHeight
+          };
+          
+          const response = await fetch(`${API_BASE}/api/convert-roi`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              videoPath,
+              uiROI: currentROI,
+              displayDimensions: displayDims
+            })
+          });
+          
+          if (response.ok) {
+            const data = await response.json();
+            if (onROIChange) {
+              onROIChange(data.videoROI);
+            }
+          } else {
+            // Fallback: use UI coordinates directly
+            if (onROIChange) {
+              onROIChange(currentROI);
+            }
+          }
+        } catch (error) {
+          console.error('Failed to convert ROI:', error);
+          // Fallback: use UI coordinates directly
+          if (onROIChange) {
+            onROIChange(currentROI);
+          }
+        }
+      } else {
+        // No conversion needed or dimensions not available
+        if (onROIChange) {
+          onROIChange(currentROI);
+        }
       }
     } else {
       setCurrentROI(null);

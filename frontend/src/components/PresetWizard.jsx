@@ -62,9 +62,10 @@ const PresetWizard = ({ selectedVideo, onProcess }) => {
         setFps(data.fps || 30);
         setVideoMetadata(data);
         
-        // Auto-set ROI if detected
+        // Auto-set ROI if detected (already in video coordinates from backend)
         if (data.roi && data.roi.w > 0) {
           setRoiCoords(data.roi);
+          // Note: Auto-detected ROI is already in video pixel coordinates
         }
         
         // Auto-suggest temporal mode
@@ -146,6 +147,7 @@ const PresetWizard = ({ selectedVideo, onProcess }) => {
   };
 
   const handleROIChange = (newROI) => {
+    // newROI is already in video coordinates (converted by ROISelector)
     setRoiCoords(newROI);
     if (newROI) {
       setRoi('manual');
@@ -248,7 +250,7 @@ const PresetWizard = ({ selectedVideo, onProcess }) => {
         {selectedVideo ? (
           <div>
             <p className="text-sm text-gray-600 mb-2">Video loaded: {selectedVideo.split('/').pop()}</p>
-            <div ref={videoRef}>
+            <div className="relative" ref={videoRef}>
               <DisplayVideo selectedVideo={selectedVideo} />
             </div>
             {analyzing ? (
@@ -295,13 +297,14 @@ const PresetWizard = ({ selectedVideo, onProcess }) => {
         </div>
         {selectedVideo && (
           <div className="relative">
-            <div className="relative w-full" style={{ maxHeight: '500px' }}>
+            <div className="relative w-full" style={{ maxHeight: '500px' }} ref={videoRef}>
               <DisplayVideo selectedVideo={selectedVideo} />
               {roi === 'manual' && (
                 <ROISelector
-                  videoElement={videoRef.current}
+                  videoElement={videoRef.current?.querySelector('video')}
                   onROIChange={handleROIChange}
                   initialROI={roiCoords}
+                  videoPath={selectedVideo}
                 />
               )}
             </div>

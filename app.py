@@ -259,6 +259,11 @@ async def save_custom_preset(request: SavePresetRequest):
 class AnalyzeRequest(BaseModel):
     videoPath: str
 
+class ConvertROIRequest(BaseModel):
+    videoPath: str
+    uiROI: Dict[str, float]  # ROI in UI coordinates
+    displayDimensions: Dict[str, float]  # Display container dimensions
+
 @app.post("/api/preview")
 async def generate_preview(request: PreviewRequest):
     """Generate a 2-3 second preview of processed video"""
@@ -310,6 +315,23 @@ async def generate_preview(request: PreviewRequest):
         result = subprocess.run(ffmpeg_cmd, shell=True, capture_output=True, text=True)
         if result.returncode != 0:
             raise HTTPException(status_code=500, detail=f"Failed to convert preview to frames: {result.stderr}")
+        
+        # Apply ROI cropping to preview if specified
+        if request.overrides and 'roi' in request.overrides:
+            roi_str = request.overrides['roi']
+            if roi_str and roi_str != 'auto':
+                try:
+                    parts = roi_str.split(',')
+                    if len(parts) == 4:
+                        preview_roi = {
+                            "x": int(float(parts[0])),
+                            "y": int(float(parts[1])),
+                            "w": int(float(parts[2])),
+                            "h": int(float(parts[3]))
+                        }
+                        auto_tuning.crop_frames_with_roi(str(preview_frames_dir), preview_roi)
+                except (ValueError, IndexError):
+                    pass
         
         # Process preview frames
         config_file_quoted = f'"{cli_args["config_file"]}"'
@@ -369,6 +391,33 @@ async def get_preview(filename: str):
         raise HTTPException(status_code=404, detail="Preview not found")
     return FileResponse(str(preview_path), media_type="video/mp4")
 
+@app.post("/api/convert-roi")
+async def convert_roi(request: ConvertROIRequest):
+    """Convert ROI coordinates from UI space to video pixel space"""
+    try:
+        video_path = Path(request.videoPath.replace("/api/video/", "data/uploads/"))
+        if not video_path.exists():
+            raise HTTPException(status_code=404, detail="Video not found")
+        
+        # Get video dimensions
+        video_dimensions = auto_tuning.get_video_dimensions(str(video_path))
+        
+        # Convert ROI coordinates
+        video_roi = auto_tuning.convert_ui_roi_to_video_roi(
+            request.uiROI,
+            video_dimensions,
+            request.displayDimensions
+        )
+        
+        return {
+            "videoROI": video_roi,
+            "videoDimensions": video_dimensions
+        }
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"ROI conversion error: {str(e)}")
+
 @app.post("/api/analyze-video")
 async def analyze_video(request: AnalyzeRequest):
     """Analyze video and return auto-tuning results (FPS, ROI, frequencies)"""
@@ -379,6 +428,10 @@ async def analyze_video(request: AnalyzeRequest):
         
         # Run auto-tuning
         print(f"Analyzing video: {video_path}")
+        
+        # Get video dimensions
+        video_dimensions = auto_tuning.get_video_dimensions(str(video_path))
+        print(f"Video dimensions: {video_dimensions}")
         
         # Detect FPS
         fps = auto_tuning.detect_video_fps(str(video_path))
@@ -400,6 +453,7 @@ async def analyze_video(request: AnalyzeRequest):
         
         return {
             "fps": fps,
+            "videoDimensions": video_dimensions,
             "roi": roi,
             "frequencies": frequencies,
             "suggested_mode": suggested_mode,
@@ -484,6 +538,27 @@ async def process_video(http_request: Request):
             else:
                 print("Warning: Stabilization failed, using original video")
         
+        # Determine if ROI cropping is needed
+        roi_to_apply = None
+        if use_preset:
+            # Check if ROI override is provided
+            if overrides and 'roi' in overrides:
+                roi_str = overrides['roi']
+                if roi_str and roi_str != 'auto':
+                    try:
+                        # Parse ROI string "x,y,w,h"
+                        parts = roi_str.split(',')
+                        if len(parts) == 4:
+                            roi_to_apply = {
+                                "x": int(float(parts[0])),
+                                "y": int(float(parts[1])),
+                                "w": int(float(parts[2])),
+                                "h": int(float(parts[3]))
+                            }
+                            print(f"ROI cropping will be applied: {roi_to_apply}")
+                    except (ValueError, IndexError) as e:
+                        print(f"Warning: Invalid ROI format '{roi_str}': {e}")
+        
         # Convert video to frames using ffmpeg
         print(f"Converting video to frames...")
         print(f"Video path: {processing_video_path}")
@@ -520,6 +595,36 @@ async def process_video(http_request: Request):
             
             # Resolve auto values
             resolved_preset = preset_loader.resolve_auto_values(preset, video_metadata, auto_tuning_results)
+            
+            # Determine final ROI for cropping (manual override takes precedence)
+            final_roi_for_cropping = roi_to_apply
+            if not final_roi_for_cropping:
+                # Check if auto-detected ROI should be used
+                resolved_roi = resolved_preset.get('run', {}).get('roi', 'auto')
+                if resolved_roi and resolved_roi != 'auto':
+                    try:
+                        # Parse ROI string "x,y,w,h"
+                        parts = resolved_roi.split(',')
+                        if len(parts) == 4:
+                            final_roi_for_cropping = {
+                                "x": int(float(parts[0])),
+                                "y": int(float(parts[1])),
+                                "w": int(float(parts[2])),
+                                "h": int(float(parts[3]))
+                            }
+                            print(f"Using auto-detected ROI for cropping: {final_roi_for_cropping}")
+                    except (ValueError, IndexError):
+                        pass
+                elif roi and roi.get("w", 0) > 0:
+                    # Use directly detected ROI (already in video coordinates)
+                    final_roi_for_cropping = roi
+                    print(f"Using directly detected ROI for cropping: {final_roi_for_cropping}")
+            
+            # Apply ROI cropping if we have one
+            if final_roi_for_cropping:
+                print(f"Applying ROI crop to frames...")
+                if not auto_tuning.crop_frames_with_roi(str(vid_dir), final_roi_for_cropping):
+                    print("Warning: ROI cropping failed, continuing with full frames")
             
             # Convert to CLI args
             cli_args = preset_loader.preset_to_cli_args(resolved_preset, 

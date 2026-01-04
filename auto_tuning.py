@@ -11,6 +11,94 @@ from typing import Tuple, List, Dict, Optional
 import json
 
 
+def get_video_dimensions(video_path: str) -> Dict[str, int]:
+    """
+    Get video dimensions (width, height).
+    
+    Args:
+        video_path: Path to video file
+        
+    Returns:
+        Dictionary with keys: width, height
+    """
+    try:
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            return {"width": 0, "height": 0}
+        
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        cap.release()
+        
+        return {"width": width, "height": height}
+    except Exception as e:
+        print(f"Warning: Could not get video dimensions: {e}")
+        return {"width": 0, "height": 0}
+
+
+def convert_ui_roi_to_video_roi(ui_roi: Dict[str, float], 
+                                video_dimensions: Dict[str, int],
+                                display_dimensions: Dict[str, float]) -> Dict[str, int]:
+    """
+    Convert ROI coordinates from UI display space to video pixel space.
+    
+    Accounts for video aspect ratio and object-contain display mode.
+    
+    Args:
+        ui_roi: ROI in UI coordinates {x, y, w, h}
+        video_dimensions: Actual video dimensions {width, height}
+        display_dimensions: Display container dimensions {width, height}
+        
+    Returns:
+        ROI in video pixel coordinates {x, y, w, h}
+    """
+    if not video_dimensions.get("width") or not video_dimensions.get("height"):
+        return ui_roi
+    
+    video_w = video_dimensions["width"]
+    video_h = video_dimensions["height"]
+    display_w = display_dimensions.get("width", video_w)
+    display_h = display_dimensions.get("height", video_h)
+    
+    # Calculate aspect ratios
+    video_aspect = video_w / video_h
+    display_aspect = display_w / display_h
+    
+    # Calculate actual displayed video size (accounting for object-contain)
+    if video_aspect > display_aspect:
+        # Video is wider - letterboxing on top/bottom
+        displayed_video_w = display_w
+        displayed_video_h = display_w / video_aspect
+        offset_x = 0
+        offset_y = (display_h - displayed_video_h) / 2
+    else:
+        # Video is taller - pillarboxing on left/right
+        displayed_video_w = display_h * video_aspect
+        displayed_video_h = display_h
+        offset_x = (display_w - displayed_video_w) / 2
+        offset_y = 0
+    
+    # Convert UI coordinates to video coordinates
+    # Subtract offset and scale by video/displayed ratio
+    video_x = int((ui_roi["x"] - offset_x) * (video_w / displayed_video_w))
+    video_y = int((ui_roi["y"] - offset_y) * (video_h / displayed_video_h))
+    video_w_roi = int(ui_roi["w"] * (video_w / displayed_video_w))
+    video_h_roi = int(ui_roi["h"] * (video_h / displayed_video_h))
+    
+    # Clamp to video bounds
+    video_x = max(0, min(video_x, video_w - 1))
+    video_y = max(0, min(video_y, video_h - 1))
+    video_w_roi = max(1, min(video_w_roi, video_w - video_x))
+    video_h_roi = max(1, min(video_h_roi, video_h - video_y))
+    
+    return {
+        "x": video_x,
+        "y": video_y,
+        "w": video_w_roi,
+        "h": video_h_roi
+    }
+
+
 def detect_video_fps(video_path: str) -> float:
     """
     Detect video frame rate using ffprobe.
@@ -269,6 +357,96 @@ def auto_choose_mode(frequencies: List[Dict[str, float]],
                 return "temporal"
     
     return "standard"
+
+
+def crop_frames_with_roi(frames_dir: str, roi: Dict[str, int]) -> bool:
+    """
+    Crop all frames in a directory based on ROI coordinates.
+    
+    Args:
+        frames_dir: Directory containing frame images
+        roi: ROI dictionary with x, y, w, h in video pixel coordinates
+        
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        if not roi or roi.get("w", 0) <= 0 or roi.get("h", 0) <= 0:
+            return True  # No cropping needed
+        
+        import glob
+        
+        # Try PIL first, fallback to OpenCV
+        try:
+            from PIL import Image
+            use_pil = True
+        except ImportError:
+            use_pil = False
+            print("PIL not available, using OpenCV for cropping")
+        
+        x = roi["x"]
+        y = roi["y"]
+        w = roi["w"]
+        h = roi["h"]
+        
+        # Get all frame files
+        frame_files = sorted(glob.glob(os.path.join(frames_dir, "*.png")))
+        if not frame_files:
+            frame_files = sorted(glob.glob(os.path.join(frames_dir, "*.jpg")))
+        
+        if not frame_files:
+            print(f"Warning: No frames found in {frames_dir}")
+            return False
+        
+        print(f"Cropping {len(frame_files)} frames with ROI: x={x}, y={y}, w={w}, h={h}")
+        
+        for frame_file in frame_files:
+            try:
+                if use_pil:
+                    # Use PIL for cropping
+                    img = Image.open(frame_file)
+                    img_width, img_height = img.size
+                    
+                    # Ensure ROI is within image bounds
+                    crop_x = max(0, min(x, img_width - 1))
+                    crop_y = max(0, min(y, img_height - 1))
+                    crop_w = min(w, img_width - crop_x)
+                    crop_h = min(h, img_height - crop_y)
+                    
+                    if crop_w > 0 and crop_h > 0:
+                        # Crop image
+                        cropped = img.crop((crop_x, crop_y, crop_x + crop_w, crop_y + crop_h))
+                        # Save back to same file
+                        cropped.save(frame_file)
+                else:
+                    # Use OpenCV for cropping
+                    img = cv2.imread(frame_file)
+                    if img is None:
+                        continue
+                    
+                    img_height, img_width = img.shape[:2]
+                    
+                    # Ensure ROI is within image bounds
+                    crop_x = max(0, min(x, img_width - 1))
+                    crop_y = max(0, min(y, img_height - 1))
+                    crop_w = min(w, img_width - crop_x)
+                    crop_h = min(h, img_height - crop_y)
+                    
+                    if crop_w > 0 and crop_h > 0:
+                        # Crop image
+                        cropped = img[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]
+                        # Save back to same file
+                        cv2.imwrite(frame_file, cropped)
+            except Exception as e:
+                print(f"Warning: Failed to crop frame {frame_file}: {e}")
+                continue
+        
+        print(f"Successfully cropped {len(frame_files)} frames")
+        return True
+        
+    except Exception as e:
+        print(f"Warning: Frame cropping failed: {e}")
+        return False
 
 
 def stabilize_video(video_path: str, output_path: str) -> bool:
