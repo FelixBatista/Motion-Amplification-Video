@@ -636,8 +636,9 @@ const PresetWizard = ({ selectedVideo, onProcess }) => {
           Next: Preview & Export
         </button>
       </div>
-    </div>
-  );
+      </div>
+    );
+  };
 
   const renderStep4 = () => (
     <div className="space-y-4">
