@@ -476,10 +476,17 @@ async def analyze_video(request: AnalyzeRequest):
             "suggested_amplification": suggested_amplification,
             "motionHeatmapUrl": heatmap_url
         }
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Video file not found. Please ensure the video was uploaded correctly.")
+    except subprocess.CalledProcessError as e:
+        raise HTTPException(status_code=500, detail=f"Video analysis failed: Could not read video metadata. Ensure the video file is valid and not corrupted.")
     except Exception as e:
         import traceback
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Analysis error: {str(e)}")
+        error_detail = str(e)
+        if "ffprobe" in error_detail.lower() or "ffmpeg" in error_detail.lower():
+            error_detail = "Video analysis failed: Could not process video file. Please ensure FFmpeg is installed and the video format is supported."
+        raise HTTPException(status_code=500, detail=f"Analysis error: {error_detail}")
 
 @app.post("/api/upload")
 async def upload_video(file: UploadFile = File(...)):
@@ -576,17 +583,30 @@ async def process_video(http_request: Request):
                     except (ValueError, IndexError) as e:
                         print(f"Warning: Invalid ROI format '{roi_str}': {e}")
         
+        # Handle trim parameters if provided
+        trim_params = ""
+        if use_preset and overrides:
+            trim_start = overrides.get('trimStart')
+            trim_end = overrides.get('trimEnd')
+            if trim_start is not None or trim_end is not None:
+                if trim_start is not None and trim_start > 0:
+                    trim_params += f" -ss {trim_start}"
+                if trim_end is not None:
+                    trim_params += f" -t {trim_end - (trim_start or 0)}"
+        
         # Convert video to frames using ffmpeg
         print(f"Converting video to frames...")
         print(f"Video path: {processing_video_path}")
         print(f"Output directory: {vid_dir}")
-        ffmpeg_cmd = f'ffmpeg -i "{processing_video_path}" "{vid_dir}/%06d.png"'
+        if trim_params:
+            print(f"Trim parameters: {trim_params}")
+        ffmpeg_cmd = f'ffmpeg -i "{processing_video_path}"{trim_params} "{vid_dir}/%06d.png"'
         print(f"FFmpeg command: {ffmpeg_cmd}")
         result = subprocess.run(ffmpeg_cmd, shell=True, capture_output=True, text=True)
         if result.returncode != 0:
             error_msg = f"FFmpeg error: {result.stderr}\nStdout: {result.stdout}"
             print(error_msg)
-            raise HTTPException(status_code=500, detail=error_msg)
+            raise HTTPException(status_code=500, detail=f"Failed to extract frames: {error_msg}")
         
         # Build processing command
         if use_preset:
@@ -708,14 +728,26 @@ async def process_video(http_request: Request):
         
         # Run processing
         print(f"Processing video (this may take a while)...")
-        result = subprocess.run(command, shell=True, capture_output=True, text=True)
-        if result.returncode != 0:
-            raise HTTPException(status_code=500, detail=f"Processing error: {result.stderr}")
+        try:
+            result = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=3600)
+            if result.returncode != 0:
+                error_msg = result.stderr or result.stdout or "Unknown processing error"
+                if "CUDA" in error_msg or "GPU" in error_msg:
+                    error_msg = "GPU processing error. Please ensure CUDA is properly configured or use CPU mode."
+                elif "Memory" in error_msg or "memory" in error_msg:
+                    error_msg = "Insufficient memory. Try processing a shorter video or reducing resolution."
+                raise HTTPException(status_code=500, detail=f"Processing failed: {error_msg}")
+        except subprocess.TimeoutExpired:
+            raise HTTPException(status_code=500, detail="Processing timed out. The video may be too long or complex. Try processing a shorter segment.")
+        except Exception as e:
+            if isinstance(e, HTTPException):
+                raise
+            raise HTTPException(status_code=500, detail=f"Processing error: {str(e)}")
         
         # Check for output file
         output_file = Path(f"data/output/{folder}/{folder}_259002.mp4")
         if not output_file.exists():
-            raise HTTPException(status_code=500, detail="Processing completed but output file not found")
+            raise HTTPException(status_code=500, detail="Processing completed but output file not found. Check the output directory for generated files.")
         
         # Re-encode video for Windows compatibility (H.264 with proper pixel format)
         print(f"Re-encoding video for Windows compatibility...")

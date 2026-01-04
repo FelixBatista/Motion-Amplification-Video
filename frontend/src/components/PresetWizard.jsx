@@ -28,6 +28,11 @@ const PresetWizard = ({ selectedVideo, onProcess }) => {
   const [showSavePreset, setShowSavePreset] = useState(false);
   const [heatmapUrl, setHeatmapUrl] = useState(null);
   const [showHeatmap, setShowHeatmap] = useState(true);
+  const [videoDuration, setVideoDuration] = useState(0);
+  const [trimStart, setTrimStart] = useState(0);
+  const [trimEnd, setTrimEnd] = useState(0);
+  const [enableTrim, setEnableTrim] = useState(false);
+  const [presetList, setPresetList] = useState([]);
   const videoRef = useRef(null);
 
   // Load presets on mount
@@ -35,10 +40,29 @@ const PresetWizard = ({ selectedVideo, onProcess }) => {
     fetch(`${API_BASE}/api/presets`)
       .then(res => res.json())
       .then(data => {
-        // Presets loaded
+        setPresetList(data.presets || []);
       })
       .catch(err => console.error('Failed to load presets:', err));
   }, []);
+
+  // Get video duration when video loads
+  useEffect(() => {
+    if (selectedVideo && videoRef.current) {
+      const video = videoRef.current.querySelector('video');
+      if (video) {
+        const handleLoadedMetadata = () => {
+          setVideoDuration(video.duration || 0);
+          setTrimEnd(video.duration || 0);
+        };
+        if (video.readyState >= 1) {
+          handleLoadedMetadata();
+        } else {
+          video.addEventListener('loadedmetadata', handleLoadedMetadata);
+          return () => video.removeEventListener('loadedmetadata', handleLoadedMetadata);
+        }
+      }
+    }
+  }, [selectedVideo]);
 
   // Analyze video when selected
   useEffect(() => {
@@ -238,6 +262,12 @@ const PresetWizard = ({ selectedVideo, onProcess }) => {
       overrides.fl = fl;
       overrides.fh = fh;
     }
+
+    // Map trim parameters
+    if (enableTrim && (trimStart > 0 || trimEnd < videoDuration)) {
+      overrides.trimStart = trimStart;
+      overrides.trimEnd = trimEnd;
+    }
     
     const requestData = {
       videoPath: selectedVideo,
@@ -250,6 +280,12 @@ const PresetWizard = ({ selectedVideo, onProcess }) => {
     }
   };
 
+  const formatTime = (seconds) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
   const renderStep1 = () => (
     <div className="space-y-4">
       <h2 className="text-2xl font-bold">Step 1: Load Video</h2>
@@ -260,6 +296,66 @@ const PresetWizard = ({ selectedVideo, onProcess }) => {
             <div className="relative" ref={videoRef}>
               <DisplayVideo selectedVideo={selectedVideo} />
             </div>
+            
+            {/* Trim Controls */}
+            {videoDuration > 0 && (
+              <div className="mt-4 p-3 bg-gray-50 rounded-lg border border-gray-300">
+                <div className="flex items-center gap-2 mb-2">
+                  <input
+                    type="checkbox"
+                    id="enableTrim"
+                    checked={enableTrim}
+                    onChange={(e) => setEnableTrim(e.target.checked)}
+                    className="w-4 h-4"
+                  />
+                  <label htmlFor="enableTrim" className="text-sm font-medium">
+                    Trim video (optional)
+                  </label>
+                </div>
+                {enableTrim && (
+                  <div className="space-y-2 mt-2">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs text-gray-600 mb-1">Start time</label>
+                        <input
+                          type="number"
+                          min="0"
+                          max={videoDuration}
+                          step="0.1"
+                          value={trimStart}
+                          onChange={(e) => {
+                            const val = Math.max(0, Math.min(parseFloat(e.target.value) || 0, trimEnd));
+                            setTrimStart(val);
+                          }}
+                          className="w-full p-2 border border-gray-300 rounded text-sm"
+                        />
+                        <span className="text-xs text-gray-500">{formatTime(trimStart)}</span>
+                      </div>
+                      <div>
+                        <label className="block text-xs text-gray-600 mb-1">End time</label>
+                        <input
+                          type="number"
+                          min={trimStart}
+                          max={videoDuration}
+                          step="0.1"
+                          value={trimEnd}
+                          onChange={(e) => {
+                            const val = Math.max(trimStart, Math.min(parseFloat(e.target.value) || videoDuration, videoDuration));
+                            setTrimEnd(val);
+                          }}
+                          className="w-full p-2 border border-gray-300 rounded text-sm"
+                        />
+                        <span className="text-xs text-gray-500">{formatTime(trimEnd)}</span>
+                      </div>
+                    </div>
+                    <div className="text-xs text-gray-600">
+                      Duration: {formatTime(trimEnd - trimStart)} (of {formatTime(videoDuration)} total)
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
             {analyzing ? (
               <p className="mt-2 text-sm text-blue-600">Analyzing video...</p>
             ) : analysisResults ? (
@@ -372,30 +468,54 @@ const PresetWizard = ({ selectedVideo, onProcess }) => {
     </div>
   );
 
-  const renderStep3 = () => (
-    <div className="space-y-4">
-      <h2 className="text-2xl font-bold">Step 3: Choose Goal</h2>
-      <div className="grid grid-cols-2 gap-4">
-        {[
-          { id: 'general_auto', name: 'General Motion', desc: 'Make motion visible (default)' },
-          { id: 'vibration_auto', name: 'Vibration / NVH', desc: 'Machinery and automotive analysis' },
-          { id: 'heartbeat_auto', name: 'Heartbeat / Breathing', desc: 'Medical and physiological' },
-          { id: 'structural_auto', name: 'Structural Motion', desc: 'Buildings, bridges, sway' },
-          { id: 'handheld_auto', name: 'Handheld / Shaky', desc: 'Camera stabilization' },
-          { id: 'advanced', name: 'Advanced', desc: 'Manual parameter control' }
-        ].map(p => (
-          <button
-            key={p.id}
-            onClick={() => handlePresetChange(p.id)}
-            className={`p-4 rounded-lg border-2 text-left ${
-              preset === p.id ? 'border-darker bg-darker bg-opacity-10' : 'border-gray-300'
-            }`}
-          >
-            <h3 className="font-bold">{p.name}</h3>
-            <p className="text-sm text-gray-600">{p.desc}</p>
-          </button>
-        ))}
-      </div>
+  const renderStep3 = () => {
+    const presetMap = {
+      'general_auto': { id: 'general_auto', name: 'General Motion', desc: 'Make motion visible (default)' },
+      'vibration_auto': { id: 'vibration_auto', name: 'Vibration / NVH', desc: 'Machinery and automotive analysis' },
+      'heartbeat_auto': { id: 'heartbeat_auto', name: 'Heartbeat / Breathing', desc: 'Medical and physiological' },
+      'structural_auto': { id: 'structural_auto', name: 'Structural Motion', desc: 'Buildings, bridges, sway' },
+      'handheld_auto': { id: 'handheld_auto', name: 'Handheld / Shaky', desc: 'Camera stabilization' },
+      'advanced': { id: 'advanced', name: 'Advanced', desc: 'Manual parameter control' }
+    };
+
+    // Merge with API descriptions if available
+    const presetsToShow = presetList.length > 0 
+      ? presetList.map(p => {
+          const defaultPreset = presetMap[p.name] || { id: p.name, name: p.name, desc: p.description || 'Custom preset' };
+          return { ...defaultPreset, description: p.description || defaultPreset.desc };
+        })
+      : Object.values(presetMap).map(p => ({ ...p, description: p.desc }));
+
+    // Add advanced if not in list
+    if (!presetsToShow.find(p => p.id === 'advanced')) {
+      presetsToShow.push({ ...presetMap['advanced'], description: presetMap['advanced'].desc });
+    }
+
+    return (
+      <div className="space-y-4">
+        <h2 className="text-2xl font-bold">Step 3: Choose Goal</h2>
+        <div className="grid grid-cols-2 gap-4">
+          {presetsToShow.map(p => (
+            <button
+              key={p.id}
+              onClick={() => handlePresetChange(p.id)}
+              className={`p-4 rounded-lg border-2 text-left relative group ${
+                preset === p.id ? 'border-darker bg-darker bg-opacity-10' : 'border-gray-300 hover:border-gray-400'
+              }`}
+              title={p.description || p.desc}
+            >
+              <h3 className="font-bold">{p.name}</h3>
+              <p className="text-sm text-gray-600">{p.description || p.desc}</p>
+              {p.description && p.description !== (p.desc || '') && (
+                <div className="absolute bottom-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <div className="bg-gray-800 text-white text-xs p-2 rounded shadow-lg max-w-xs z-10">
+                    {p.description}
+                  </div>
+                </div>
+              )}
+            </button>
+          ))}
+        </div>
       {showAdvanced && (
         <div className="mt-4 space-y-4">
           <AdvancedSettings
