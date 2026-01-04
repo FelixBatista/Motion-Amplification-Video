@@ -63,8 +63,50 @@ def main(args):
     exp_name = config['exp_name']
     setproctitle.setproctitle('{}_{}_{}' \
                               .format(args.phase, network_type, exp_name))
-    tfconfig = tf.compat.v1.ConfigProto(allow_soft_placement=True, log_device_placement=False)
-    tfconfig.gpu_options.allow_growth = True
+    
+    # Check for GPU availability and configure
+    try:
+        gpus = tf.config.experimental.list_physical_devices('GPU')
+        use_gpu = len(gpus) > 0
+        
+        if use_gpu:
+            try:
+                # Enable memory growth for all GPUs to avoid allocating all memory at once
+                for gpu in gpus:
+                    tf.config.experimental.set_memory_growth(gpu, True)
+                print(f"✓ Found {len(gpus)} GPU(s). GPU acceleration will be used.")
+                for i, gpu in enumerate(gpus):
+                    print(f"  GPU {i}: {gpu.name}")
+            except RuntimeError as e:
+                print(f"Warning: GPU configuration error: {e}")
+                use_gpu = False
+        else:
+            print("⚠ No GPU found. Using CPU (processing will be slower).")
+    except Exception as e:
+        print(f"Warning: Could not check for GPUs: {e}")
+        use_gpu = False
+        gpus = []
+    
+    # Configure TensorFlow session for optimal GPU/CPU usage
+    tfconfig = tf.compat.v1.ConfigProto(
+        allow_soft_placement=True,  # Allow fallback to CPU if operation not supported on GPU
+        log_device_placement=False,  # Set to True for debugging which device is used
+    )
+    
+    if use_gpu:
+        # Configure GPU options for optimal performance
+        tfconfig.gpu_options.allow_growth = True  # Allow GPU memory to grow dynamically
+        tfconfig.gpu_options.per_process_gpu_memory_fraction = 0.9  # Use up to 90% of GPU memory
+        # Ensure CUDA is visible (should be set before TF import, but set here as fallback)
+        if 'CUDA_VISIBLE_DEVICES' not in os.environ:
+            os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+        print("✓ GPU configuration applied. Neural network operations will use GPU.")
+    else:
+        # Force CPU usage if no GPU
+        tfconfig.device_count['GPU'] = 0
+        if 'CUDA_VISIBLE_DEVICES' in os.environ:
+            del os.environ['CUDA_VISIBLE_DEVICES']
+        print("✓ CPU mode configured.")
 
     with tf.compat.v1.Session(config=tfconfig) as sess:
         model = MagNet3Frames(sess, exp_name, config['architecture'])

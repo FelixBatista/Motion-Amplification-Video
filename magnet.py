@@ -162,6 +162,7 @@ class MagNet3Frames(object):
 
     def inference(self, frameA, frameB, amplification_factor):
         """Run Magnification on two frames.
+        Operations are automatically placed on GPU if available via TensorFlow's device placement.
 
         Args:
             frameA: path to first frame

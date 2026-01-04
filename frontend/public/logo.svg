@@ -1,0 +1,60 @@
+<svg width="200" height="200" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background gradient -->
+  <defs>
+    <linearGradient id="bgGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#7FD4D4;stop-opacity:1" />
+      <stop offset="50%" style="stop-color:#5FB3B3;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#3A8A8A;stop-opacity:1" />
+    </linearGradient>
+    <radialGradient id="logoGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" style="stop-color:#4FC3F7;stop-opacity:0.8" />
+      <stop offset="100%" style="stop-color:#0288D1;stop-opacity:0.3" />
+    </radialGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  
+  <!-- Background -->
+  <rect width="200" height="200" fill="url(#bgGradient)"/>
+  
+  <!-- Logo: Glowing ring -->
+  <circle cx="80" cy="100" r="45" fill="none" stroke="#4FC3F7" stroke-width="3" filter="url(#glow)" opacity="0.9"/>
+  
+  <!-- Logo: Dark blue circle -->
+  <circle cx="80" cy="100" r="35" fill="#1565C0"/>
+  
+  <!-- Equalizer bars (left side) -->
+  <g filter="url(#glow)">
+    <rect x="35" y="85" width="4" height="15" fill="#4FC3F7" rx="2"/>
+    <rect x="42" y="80" width="4" height="25" fill="#4FC3F7" rx="2"/>
+    <rect x="49" y="75" width="4" height="35" fill="#4FC3F7" rx="2"/>
+    <rect x="56" y="82" width="4" height="21" fill="#4FC3F7" rx="2"/>
+    <rect x="63" y="88" width="4" height="9" fill="#4FC3F7" rx="2"/>
+  </g>
+  
+  <!-- Small circle and line (left of equalizer) -->
+  <circle cx="28" cy="100" r="3" fill="#4FC3F7" filter="url(#glow)"/>
+  <line x1="32" y1="100" x2="35" y2="100" stroke="#4FC3F7" stroke-width="2" filter="url(#glow)"/>
+  
+  <!-- Play button (center) -->
+  <path d="M 75 90 L 75 110 L 90 100 Z" fill="white" opacity="0.95"/>
+  
+  <!-- Glowing particles -->
+  <circle cx="25" cy="85" r="1.5" fill="white" opacity="0.8"/>
+  <circle cx="30" cy="95" r="1" fill="white" opacity="0.7"/>
+  <circle cx="20" cy="105" r="1.5" fill="white" opacity="0.8"/>
+  
+  <!-- Text: Motion Amplifier -->
+  <text x="120" y="95" font-family="Arial, sans-serif" font-size="24" font-weight="bold" fill="#0D47A1">
+    Motion
+  </text>
+  <text x="120" y="120" font-family="Arial, sans-serif" font-size="24" font-weight="bold" fill="#0D47A1">
+    Amplifier
+  </text>
+</svg>
+
