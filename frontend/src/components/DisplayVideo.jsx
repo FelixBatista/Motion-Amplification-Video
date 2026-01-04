@@ -15,13 +15,13 @@ const DisplayVideo = ({ selectedVideo }) => {
   };
 
   return (
-    <div className="w-full h-full flex items-center justify-center overflow-hidden">
+    <div className="flex items-center justify-center">
       {selectedVideo ? (
         <video
           controls
           src={getVideoUrl(selectedVideo)}
-          className="max-w-full max-h-full object-contain"
-          style={{ width: 'auto', height: 'auto' }}
+          className="max-w-full max-h-[600px] object-contain"
+          style={{ display: 'block' }}
         >
           Your browser does not support the video tag.
         </video>

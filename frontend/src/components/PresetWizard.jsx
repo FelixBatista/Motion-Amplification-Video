@@ -498,32 +498,34 @@ const PresetWizard = ({ selectedVideo, onProcess }) => {
             <span>Auto-detect region (recommended)</span>
           </label>
           {roi === 'auto' && heatmapUrl && (
-            <label className="flex items-center text-sm text-gray-600">
+            <label className="flex items-center text-sm text-gray-600 cursor-pointer">
               <input
                 type="checkbox"
                 checked={showHeatmap}
                 onChange={(e) => setShowHeatmap(e.target.checked)}
-                className="mr-2"
+                className="mr-2 cursor-pointer"
               />
-              <span>Show motion energy heatmap</span>
+              <span>Show motion energy heatmap (overlay on video)</span>
             </label>
           )}
         </div>
         {selectedVideo && (
           <div className="relative">
-            <div className="relative w-full bg-gray-200 rounded overflow-hidden" style={{ maxHeight: '500px', minHeight: '300px' }} ref={videoRef}>
-              <div className="relative w-full h-full flex items-center justify-center" style={{ maxHeight: '500px' }}>
+            <div className="relative w-full bg-gray-200 rounded flex items-center justify-center p-4" ref={videoRef} style={{ minHeight: '300px' }}>
+              <div className="relative" style={{ maxWidth: '100%', display: 'inline-block' }}>
                 <DisplayVideo selectedVideo={selectedVideo} />
-                {roi === 'auto' && showHeatmap && heatmapUrl && (
-                  <div 
-                    className="absolute inset-0 pointer-events-none z-10"
+                {roi === 'auto' && heatmapUrl && (
+                  <img
+                    src={`${API_BASE}${heatmapUrl}`}
+                    alt="Motion Energy Heatmap"
+                    className="absolute top-0 left-0 pointer-events-none z-10"
                     style={{
-                      backgroundImage: `url(${API_BASE}${heatmapUrl})`,
-                      backgroundSize: 'contain',
-                      backgroundPosition: 'center',
-                      backgroundRepeat: 'no-repeat',
-                      opacity: 0.6,
-                      mixBlendMode: 'screen'
+                      opacity: showHeatmap ? 0.6 : 0,
+                      mixBlendMode: 'screen',
+                      width: '100%',
+                      height: '100%',
+                      objectFit: 'contain',
+                      transition: 'opacity 0.3s'
                     }}
                     title="Motion Energy Heatmap - Red/Yellow areas show high motion"
                   />
@@ -838,13 +840,13 @@ const PresetWizard = ({ selectedVideo, onProcess }) => {
         <div className="flex items-center justify-between">
           {[1, 2, 3, 4].map(step => (
             <div key={step} className="flex items-center flex-1">
-              <div className="flex flex-col items-center">
+              <div className="flex flex-col items-center flex-1">
                 <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
                   currentStep >= step ? 'bg-darker text-white' : 'bg-gray-300 text-gray-600'
                 }`}>
                   {step}
                 </div>
-                <span className="mt-2 text-xs text-gray-600">
+                <span className="mt-2 text-xs text-gray-600 text-center w-full">
                   {step === 1 ? 'Load' : step === 2 ? 'Region' : step === 3 ? 'Goal' : 'Export'}
                 </span>
               </div>
