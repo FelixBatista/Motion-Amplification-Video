@@ -459,30 +459,32 @@ const PresetWizard = ({ selectedVideo, onProcess }) => {
         </div>
         {selectedVideo && (
           <div className="relative">
-            <div className="relative w-full" style={{ maxHeight: '500px' }} ref={videoRef}>
-              <DisplayVideo selectedVideo={selectedVideo} />
-              {roi === 'auto' && showHeatmap && heatmapUrl && (
-                <div 
-                  className="absolute inset-0 pointer-events-none z-10"
-                  style={{
-                    backgroundImage: `url(${API_BASE}${heatmapUrl})`,
-                    backgroundSize: 'contain',
-                    backgroundPosition: 'center',
-                    backgroundRepeat: 'no-repeat',
-                    opacity: 0.6,
-                    mixBlendMode: 'screen'
-                  }}
-                  title="Motion Energy Heatmap - Red/Yellow areas show high motion"
-                />
-              )}
-              {roi === 'manual' && (
-                <ROISelector
-                  videoElement={videoRef.current?.querySelector('video')}
-                  onROIChange={handleROIChange}
-                  initialROI={roiCoords}
-                  videoPath={selectedVideo}
-                />
-              )}
+            <div className="relative w-full bg-gray-200 rounded overflow-hidden" style={{ maxHeight: '500px', minHeight: '300px' }} ref={videoRef}>
+              <div className="relative w-full h-full flex items-center justify-center" style={{ maxHeight: '500px' }}>
+                <DisplayVideo selectedVideo={selectedVideo} />
+                {roi === 'auto' && showHeatmap && heatmapUrl && (
+                  <div 
+                    className="absolute inset-0 pointer-events-none z-10"
+                    style={{
+                      backgroundImage: `url(${API_BASE}${heatmapUrl})`,
+                      backgroundSize: 'contain',
+                      backgroundPosition: 'center',
+                      backgroundRepeat: 'no-repeat',
+                      opacity: 0.6,
+                      mixBlendMode: 'screen'
+                    }}
+                    title="Motion Energy Heatmap - Red/Yellow areas show high motion"
+                  />
+                )}
+                {roi === 'manual' && (
+                  <ROISelector
+                    videoElement={videoRef.current?.querySelector('video')}
+                    onROIChange={handleROIChange}
+                    initialROI={roiCoords}
+                    videoPath={selectedVideo}
+                  />
+                )}
+              </div>
             </div>
             {roi === 'manual' && roiCoords && (
               <div className="mt-2 text-sm text-gray-600">

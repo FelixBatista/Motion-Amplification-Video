@@ -55,7 +55,17 @@ const ROISelector = ({ videoElement, onROIChange, initialROI = null, videoPath =
   }, [videoElement, videoPath]);
 
   const getRelativeCoordinates = (e) => {
-    if (!containerRef.current) return { x: 0, y: 0 };
+    if (!containerRef.current) {
+      // Fallback: try to get from video element's parent
+      if (videoElement && videoElement.parentElement) {
+        const rect = videoElement.parentElement.getBoundingClientRect();
+        return {
+          x: e.clientX - rect.left,
+          y: e.clientY - rect.top
+        };
+      }
+      return { x: 0, y: 0 };
+    }
     const rect = containerRef.current.getBoundingClientRect();
     return {
       x: e.clientX - rect.left,
@@ -71,11 +81,14 @@ const ROISelector = ({ videoElement, onROIChange, initialROI = null, videoPath =
   };
 
   const handleMouseMove = (e) => {
-    if (!isDrawing || !videoElement || !containerRef.current) return;
+    if (!isDrawing) return;
     const pos = getRelativeCoordinates(e);
-    const rect = containerRef.current.getBoundingClientRect();
+    const container = containerRef.current || (videoElement?.parentElement);
+    if (!container) return;
     
-    // Calculate ROI bounds
+    const rect = container.getBoundingClientRect();
+    
+    // Calculate ROI bounds - ensure they stay within container
     const x = Math.max(0, Math.min(startPos.x, pos.x));
     const y = Math.max(0, Math.min(startPos.y, pos.y));
     const w = Math.min(rect.width - x, Math.abs(pos.x - startPos.x));
@@ -142,12 +155,31 @@ const ROISelector = ({ videoElement, onROIChange, initialROI = null, videoPath =
     }
   };
 
+  // Set containerRef when the overlay div mounts
+  useEffect(() => {
+    if (videoElement && videoElement.parentElement) {
+      // Find the relative container that wraps the video
+      let parent = videoElement.parentElement;
+      while (parent && !parent.classList.contains('relative')) {
+        parent = parent.parentElement;
+        if (!parent || parent === document.body) break;
+      }
+      if (parent && !containerRef.current) {
+        containerRef.current = parent;
+      }
+    }
+  }, [videoElement]);
+
+  if (!videoElement) {
+    return null;
+  }
+
   return (
-    <div className="relative w-full h-full" ref={containerRef}>
+    <>
       {currentROI && (
         <>
           <div
-            className="absolute border-2 border-blue-500 bg-blue-500 bg-opacity-20 pointer-events-none z-10"
+            className="absolute border-2 border-blue-500 bg-blue-500 bg-opacity-20 pointer-events-none z-30"
             style={{
               left: `${currentROI.x}px`,
               top: `${currentROI.y}px`,
@@ -156,10 +188,10 @@ const ROISelector = ({ videoElement, onROIChange, initialROI = null, videoPath =
             }}
           />
           <div
-            className="absolute text-xs bg-blue-500 text-white px-2 py-1 pointer-events-none z-10"
+            className="absolute text-xs bg-blue-500 text-white px-2 py-1 rounded pointer-events-none z-30"
             style={{
               left: `${currentROI.x}px`,
-              top: `${currentROI.y - 25}px`
+              top: `${Math.max(0, currentROI.y - 25)}px`
             }}
           >
             {Math.round(currentROI.w)} × {Math.round(currentROI.h)}
@@ -167,21 +199,31 @@ const ROISelector = ({ videoElement, onROIChange, initialROI = null, videoPath =
         </>
       )}
       <div
-        className="absolute inset-0 cursor-crosshair"
+        className="absolute inset-0 cursor-crosshair z-20"
+        ref={(el) => {
+          // Use this div as container if we can't find the parent
+          if (el) {
+            if (!containerRef.current) {
+              containerRef.current = el.parentElement || el;
+            }
+          }
+        }}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
+        style={{ pointerEvents: 'auto' }}
       />
       {currentROI && (
         <button
           onClick={handleClear}
-          className="absolute top-2 right-2 bg-red-500 text-white px-3 py-1 rounded text-sm z-20 hover:bg-red-600"
+          className="absolute top-2 right-2 bg-red-500 text-white px-3 py-1 rounded text-sm z-40 hover:bg-red-600 shadow-lg"
+          style={{ pointerEvents: 'auto' }}
         >
           Clear Selection
         </button>
       )}
-    </div>
+    </>
   );
 };
 
